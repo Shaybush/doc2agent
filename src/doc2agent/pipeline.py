@@ -1,24 +1,39 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from doc2agent.analyzer import StructuralAnalyzer
 from doc2agent.converter import Converter, ConverterResult
 from doc2agent.normalization.markdown_normalizer import MarkdownNormalizer
 from doc2agent.security import SecurityGateway
-from doc2agent.security.models import SecurityResult
+from doc2agent.security.models import (
+    SecurityDecision,
+    SecurityResult,
+)
 from doc2agent.validator import DocumentValidator
+
+
+class PipelineStatus(StrEnum):
+    READY = "ready"
+    READY_WITH_REDACTIONS = "ready_with_redactions"
+    BLOCKED = "blocked"
 
 
 @dataclass(frozen=True)
 class PipelineResult:
+    status: PipelineStatus
     converted: ConverterResult
     normalized_markdown: Path
     document_json: Path
     validation_json: Path
     security_json: Path
     security: SecurityResult
+
+    @property
+    def can_send_to_llm(self) -> bool:
+        return self.status != PipelineStatus.BLOCKED
 
 
 class Doc2AgentPipeline:
@@ -32,6 +47,7 @@ class Doc2AgentPipeline:
         -> validation.json
         -> Security Gateway
         -> security.json
+        -> readiness decision
     """
 
     def __init__(
@@ -122,13 +138,18 @@ class Doc2AgentPipeline:
             validation_json,
         )
 
-        # 5. document.json -> Security Gateway -> security.json
-        security_document = document.model_dump(mode="json")
-
+        # 5. Pydantic model -> JSON-compatible dictionary
+        security_document = document.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+        
+        # 6. document dictionary -> Security Gateway
         security_result = self.security_gateway.process(
             security_document
         )
 
+        # 7. Save the security report and sanitized document
         security_dir = output_root / "security"
         security_dir.mkdir(
             parents=True,
@@ -145,7 +166,16 @@ class Doc2AgentPipeline:
             encoding="utf-8",
         )
 
+        # 8. Determine whether the document may be sent to an LLM
+        if security_result.decision == SecurityDecision.BLOCK:
+            status = PipelineStatus.BLOCKED
+        elif security_result.decision == SecurityDecision.REDACT:
+            status = PipelineStatus.READY_WITH_REDACTIONS
+        else:
+            status = PipelineStatus.READY
+
         return PipelineResult(
+            status=status,
             converted=converted,
             normalized_markdown=normalized_path,
             document_json=document_json,

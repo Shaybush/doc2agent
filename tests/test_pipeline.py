@@ -4,26 +4,45 @@ import json
 from pathlib import Path
 from typing import Any
 
-from doc2agent.pipeline import Doc2AgentPipeline
+from doc2agent.pipeline import (
+    Doc2AgentPipeline,
+    PipelineStatus,
+)
 
 
-FIXTURE = Path(__file__).parent / "fixtures" / "hebrew_test_document.docx"
+FIXTURE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "hebrew_test_document.docx"
+)
 
 
-def _flatten_sections(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _flatten_sections(
+    sections: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
 
     for section in sections:
         result.append(section)
-        result.extend(_flatten_sections(section.get("children", [])))
+        result.extend(
+            _flatten_sections(
+                section.get("children", [])
+            )
+        )
 
     return result
 
 
-def _all_blocks(document: dict[str, Any]) -> list[dict[str, Any]]:
-    blocks: list[dict[str, Any]] = list(document.get("preamble", []))
+def _all_blocks(
+    document: dict[str, Any],
+) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = list(
+        document.get("preamble", [])
+    )
 
-    for section in _flatten_sections(document.get("sections", [])):
+    for section in _flatten_sections(
+        document.get("sections", [])
+    ):
         blocks.extend(section.get("blocks", []))
 
     return blocks
@@ -42,6 +61,10 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
         output_root,
     )
 
+    # Pipeline readiness
+    assert result.status == PipelineStatus.READY
+    assert result.can_send_to_llm is True
+
     # Files were produced
     assert result.converted.markdown.exists()
     assert result.converted.metadata.exists()
@@ -49,44 +72,49 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
     assert result.document_json.exists()
     assert result.validation_json.exists()
     assert result.security_json.exists()
-    assert result.converted.markdown != result.normalized_markdown
+
+    assert (
+        result.converted.markdown
+        != result.normalized_markdown
+    )
 
     # Normalized Markdown
-    normalized = result.normalized_markdown.read_text(encoding="utf-8")
+    normalized = result.normalized_markdown.read_text(
+        encoding="utf-8"
+    )
 
     assert "# 1. מבוא" in normalized
     assert "## 1.1 מטרות הבדיקה" in normalized
     assert "### 1.1.1 שלבים צפויים" in normalized
 
     assert r"**# 1. מבוא**" not in normalized
-    assert r"\- שמירה על היררכיית כותרות." not in normalized
+    assert (
+        r"\- שמירה על היררכיית כותרות."
+        not in normalized
+    )
     assert r"1\. Converter" not in normalized
 
     assert "שמירה על היררכיית כותרות." in normalized
 
     # document.json
     document = json.loads(
-        result.document_json.read_text(encoding="utf-8")
-    )
-
-    security = json.loads(
-    result.security_json.read_text(encoding="utf-8")
-)
-
-    assert security["decision"] in {
-        "pass",
-        "redact",
-        "block",
-    }
-    assert isinstance(security["sanitized_document"], dict)
-    assert isinstance(security["findings"], list)
-
-    assert (
-        security["sanitized_document"]["schema_version"]
-        == document["schema_version"]
+        result.document_json.read_text(
+            encoding="utf-8"
+        )
     )
 
     assert document["schema_version"] == "1.0"
+
+    # security.json
+    security = json.loads(
+        result.security_json.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert security["decision"] == "pass"
+    assert security["findings"] == []
+    assert security["sanitized_document"] == document
 
     info = document["document"]
 
@@ -94,7 +122,10 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
     assert info["language"] == "mixed"
     assert info["direction"] == "mixed"
 
-    assert Path(info["markdown"]) == result.normalized_markdown
+    assert (
+        Path(info["markdown"])
+        == result.normalized_markdown
+    )
 
     # Section hierarchy
     sections = document["sections"]
@@ -136,7 +167,10 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
 
     # Blocks
     blocks = _all_blocks(document)
-    block_types = [block["type"] for block in blocks]
+    block_types = [
+        block["type"]
+        for block in blocks
+    ]
 
     assert "paragraph" in block_types
     assert "unordered_list" in block_types
@@ -187,9 +221,21 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
     ]
 
     assert table["rows"] == [
-        ["Converter", "DOCX", "Markdown"],
-        ["StructuralAnalyzer", "Markdown", "document.json"],
-        ["LLM Enrichment", "document.json", "enriched.json"],
+        [
+            "Converter",
+            "DOCX",
+            "Markdown",
+        ],
+        [
+            "StructuralAnalyzer",
+            "Markdown",
+            "document.json",
+        ],
+        [
+            "LLM Enrichment",
+            "document.json",
+            "enriched.json",
+        ],
     ]
 
     # Image
@@ -201,14 +247,21 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
 
     assert image["alt"] == "doc2agent_test_image.png"
     assert image["src"].endswith(
-        "media/hebrew_test_document/doc2agent_test_image.png"
+        "media/hebrew_test_document/"
+        "doc2agent_test_image.png"
     )
 
     # Source line integrity
     for block in blocks:
         assert block["start_line"] >= 1
-        assert block["end_line"] >= block["start_line"]
+        assert (
+            block["end_line"]
+            >= block["start_line"]
+        )
 
     for section in _flatten_sections(sections):
         assert section["start_line"] >= 1
-        assert section["end_line"] >= section["start_line"]
+        assert (
+            section["end_line"]
+            >= section["start_line"]
+        )
