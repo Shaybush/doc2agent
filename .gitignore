@@ -1,0 +1,41 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+
+# Environment and local settings
+.env
+.env.*
+settings.json
+
+# IDE
+.vscode/
+.idea/
+
+# Runtime input and output
+input/
+output/
+
+# Archives and temporary files
+*.zip
+*.tmp
+*.log
