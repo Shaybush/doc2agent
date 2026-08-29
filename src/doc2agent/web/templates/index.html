@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Doc2Agent</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <script src="{{ url_for('static', path='htmx.min.js') }}" defer></script>
+  </head>
+  <body>
+    <main>
+      <h1>Doc2Agent</h1>
+      <p>Convert a Word document into safe structured JSON and Copilot-ready Markdown.</p>
+
+      <form
+        hx-post="/documents/process"
+        hx-target="#processing-result"
+        hx-swap="innerHTML"
+        hx-indicator="#process-loader"
+        enctype="multipart/form-data"
+      >
+        <label for="file">Choose DOC/DOCX</label>
+        <input id="file" name="file" type="file" accept=".doc,.docx" required>
+        <button type="submit">Process</button>
+        <span id="process-loader" class="loader htmx-indicator" role="status">Processing…</span>
+      </form>
+      <p class="hint">Secure intake currently processes DOCX. A DOC upload receives a clear intake error.</p>
+
+      <section id="processing-result" aria-live="polite"></section>
+    </main>
+  </body>
+</html>

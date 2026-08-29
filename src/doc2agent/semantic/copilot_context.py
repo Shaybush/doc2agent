@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from hashlib import sha256
@@ -11,6 +12,28 @@ from uuid import uuid4
 from doc2agent.semantic.candidate import KnowledgeCandidate
 from doc2agent.semantic.candidate_review import CandidateReviewer
 from doc2agent.semantic.models import SemanticAnnotation
+
+
+def copilot_context_output_path(
+    approved: KnowledgeCandidate,
+    storage_root: str | Path,
+    document_id: str,
+) -> Path:
+    """Return the stable published context location for an approved document."""
+
+    manifest = approved.document.source_manifest
+    if manifest is None:
+        raise ValueError("Approved knowledge is missing its source manifest")
+    storage_root = Path(storage_root)
+    source_stem = _safe_path_component(Path(manifest.filename).stem)
+    return storage_root / "copilot-context" / (
+        f"{source_stem}--{_safe_path_component(document_id)}"
+    )
+
+
+def _safe_path_component(value: str) -> str:
+    compact = re.sub(r"[^\w.-]+", "-", value, flags=re.UNICODE).strip(".-")
+    return compact or "document"
 
 
 @dataclass(frozen=True)

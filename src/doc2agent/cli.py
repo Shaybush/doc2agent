@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import typer
@@ -22,6 +21,7 @@ from doc2agent.semantic import (
     SemanticEvaluationRunner,
     TopicRenderer,
     artifact_root_for_document,
+    copilot_context_output_path,
     deepseek_settings_from_environment,
     document_artifact_name,
     openai_compatible_settings_from_environment,
@@ -45,10 +45,7 @@ def _copilot_context_output_path(
         raise ValueError("Approved knowledge is missing its source manifest")
     document_id = IngestService(storage_root).document_id_for_source(manifest.source_id)
     document_key = document_id or manifest.source_id.removeprefix("sha256:")[:12]
-    source_stem = _safe_path_component(Path(manifest.filename).stem)
-    return storage_root / "copilot-context" / (
-        f"{source_stem}--{_safe_path_component(document_key)}"
-    )
+    return copilot_context_output_path(approved, storage_root, document_key)
 
 
 def _storage_root_for_approved_path(approved_path: Path, fallback: Path) -> Path:
@@ -60,11 +57,6 @@ def _storage_root_for_approved_path(approved_path: Path, fallback: Path) -> Path
     if approved_parent.parent.name == "approved":
         return approved_parent.parent.parent
     return fallback
-
-
-def _safe_path_component(value: str) -> str:
-    compact = re.sub(r"[^\w.-]+", "-", value, flags=re.UNICODE).strip(".-")
-    return compact or "document"
 
 
 @app.command()

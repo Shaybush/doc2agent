@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+import logging
+from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
+from threading import Lock
+from uuid import uuid4
+
+from fastapi import APIRouter, Request, UploadFile
+from fastapi.responses import PlainTextResponse
+from fastapi.templating import Jinja2Templates
+
+from doc2agent.application import CandidateProof, DocumentProcessingError, ProcessingResult
+from doc2agent.converter import safe_name
+
+logger = logging.getLogger(__name__)
+
+ALLOWED_UPLOAD_EXTENSIONS = {".doc", ".docx"}
+SESSION_COOKIE = "doc2agent_web_session"
+templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+
+class ProcessedArtifactStore:
+    """In-memory download payloads keyed by server-generated IDs only."""
+
+    def __init__(self) -> None:
+        self._items: dict[str, ProcessingResult] = {}
+        self._document_ids: dict[tuple[str, str], str] = {}
+        self._candidates: dict[str, CandidateProof] = {}
+        self._lock = Lock()
+
+    def add(self, result: ProcessingResult) -> str:
+        artifact_id = str(uuid4())
+        with self._lock:
+            self._items[artifact_id] = result
+        return artifact_id
+
+    def get(self, artifact_id: str) -> ProcessingResult | None:
+        with self._lock:
+            return self._items.get(artifact_id)
+
+    def document_id_for(self, session_id: str, filename: str) -> str | None:
+        with self._lock:
+            return self._document_ids.get((session_id, filename))
+
+    def remember_document(self, session_id: str, result: ProcessingResult) -> None:
+        with self._lock:
+            self._document_ids[(session_id, result.filename)] = result.document_id
+
+    def candidate(self, artifact_id: str) -> CandidateProof | None:
+        with self._lock:
+            return self._candidates.get(artifact_id)
+
+    def set_candidate(self, artifact_id: str, candidate: CandidateProof) -> None:
+        with self._lock:
+            self._candidates[artifact_id] = candidate
+
+    def replace(self, artifact_id: str, result: ProcessingResult) -> None:
+        with self._lock:
+            self._items[artifact_id] = result
+
+
+def create_router() -> APIRouter:
+    router = APIRouter()
+
+    @router.get("/")
+    def index(request: Request):
+        return templates.TemplateResponse(request=request, name="index.html")
+
+    @router.post("/documents/process")
+    async def process_document(request: Request, file: UploadFile):
+        filename = _safe_upload_name(file.filename)
+        if filename is None:
+            return _error_response(
+                request,
+                "Upload",
+                "Choose a .doc or .docx file.",
+            )
+
+        service = request.app.state.processing_service
+        session_id = request.cookies.get(SESSION_COOKIE) or str(uuid4())
+        artifacts = request.app.state.processed_artifacts
+        try:
+            with TemporaryDirectory(prefix="doc2agent-upload-") as temporary_directory:
+                upload_path = Path(temporary_directory) / filename
+                await _save_upload(file, upload_path, request.app.state.max_upload_bytes)
+                result = service.process(
+                    upload_path,
+                    document_id=artifacts.document_id_for(session_id, filename),
+                )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        except Exception:
+            logger.exception("Unexpected document processing failure")
+            return _error_response(
+                request,
+                "Processing",
+                "The document could not be processed. Check the server logs for details.",
+            )
+        finally:
+            await file.close()
+
+        artifacts.remember_document(session_id, result)
+        artifact_id = artifacts.add(result)
+        response = templates.TemplateResponse(
+            request=request,
+            name="partials/result.html",
+            context={"result": result, "artifact_id": artifact_id},
+        )
+        response.set_cookie(
+            SESSION_COOKIE,
+            session_id,
+            httponly=True,
+            samesite="lax",
+        )
+        return response
+
+    @router.post("/documents/{artifact_id}/candidate")
+    def generate_candidate(artifact_id: str, request: Request):
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        if result is None:
+            return _error_response(request, "Candidate", "Processing result was not found.")
+        try:
+            proof = request.app.state.processing_service.generate_candidate(result)
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        except Exception:
+            logger.exception("Candidate generation failed")
+            return _error_response(
+                request, "Candidate", "Could not generate a candidate. Check server logs."
+            )
+        artifacts.set_candidate(artifact_id, proof)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/candidate.html",
+            context={"artifact_id": artifact_id, "proof": proof},
+        )
+
+    @router.post("/documents/{artifact_id}/approve")
+    async def approve_candidate(artifact_id: str, request: Request):
+        form = await request.form()
+        approved_by = str(form.get("approved_by", ""))
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Approval", "Generate and review a candidate first.")
+        try:
+            final_markdown = request.app.state.processing_service.approve_and_publish(
+                result, proof, approved_by
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        updated_result = result.model_copy(
+            update={"published_copilot_markdown": final_markdown}
+        )
+        artifacts.replace(artifact_id, updated_result)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/result.html",
+            context={"artifact_id": artifact_id, "result": updated_result},
+        )
+
+    @router.get("/documents/{artifact_id}/markdown")
+    def download_markdown(artifact_id: str, request: Request):
+        result = request.app.state.processed_artifacts.get(artifact_id)
+        if result is None or result.markdown is None:
+            return PlainTextResponse("Markdown artifact not found.", status_code=404)
+        return PlainTextResponse(
+            result.markdown,
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{_download_stem(result.filename)}.md"'
+                )
+            },
+        )
+
+    @router.get("/documents/{artifact_id}/copilot-markdown")
+    def download_copilot_markdown(artifact_id: str, request: Request):
+        result = request.app.state.processed_artifacts.get(artifact_id)
+        if result is None or result.published_copilot_markdown is None:
+            return PlainTextResponse("Published Copilot Markdown not found.", status_code=404)
+        return PlainTextResponse(
+            result.published_copilot_markdown,
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{_download_stem(result.filename)}.copilot.md"'
+                )
+            },
+        )
+
+    @router.get("/documents/{artifact_id}/json")
+    def download_json(artifact_id: str, request: Request):
+        result = request.app.state.processed_artifacts.get(artifact_id)
+        if result is None:
+            return PlainTextResponse("JSON artifact not found.", status_code=404)
+        return PlainTextResponse(
+            result.model_dump_json(indent=2),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{_download_stem(result.filename)}.json"'
+                )
+            },
+        )
+
+    return router
+
+
+def _safe_upload_name(filename: str | None) -> str | None:
+    if not filename:
+        return None
+    original_name = PurePosixPath(filename.replace("\\", "/")).name
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in ALLOWED_UPLOAD_EXTENSIONS:
+        return None
+    return f"{safe_name(Path(original_name).stem)}{suffix}"
+
+
+async def _save_upload(
+    file: UploadFile,
+    destination: Path,
+    max_upload_bytes: int,
+) -> None:
+    size = 0
+    with destination.open("wb") as target:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > max_upload_bytes:
+                raise DocumentProcessingError(
+                    "Upload",
+                    "File exceeds the configured upload limit.",
+                )
+            target.write(chunk)
+
+
+def _download_stem(filename: str) -> str:
+    return safe_name(Path(filename).stem)
+
+
+def _error_response(request: Request, stage: str, reason: str):
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/error.html",
+        context={"stage": stage, "reason": reason},
+    )

@@ -1,0 +1,26 @@
+<section id="workflow" class="result">
+  <h2>Candidate review / proof</h2>
+  <p>Candidate hash: <code>{{ proof.candidate_sha256 }}</code></p>
+  {% if proof.facts %}
+    {% for fact in proof.facts %}
+      <article>
+        <h3>{{ fact.kind }}: {{ fact.value }}</h3>
+        {% for evidence in fact.evidence %}
+          <p><strong>Proof:</strong> {{ evidence.section_path | join(' / ') or 'Preamble' }}, lines {{ evidence.start_line }}–{{ evidence.end_line }} ({{ evidence.support }})</p>
+          <details>
+            <summary>Open source text</summary>
+            <pre>{{ evidence.source_text }}</pre>
+          </details>
+        {% endfor %}
+      </article>
+    {% endfor %}
+  {% else %}
+    <p class="hint">The provider found no explicitly supported facts.</p>
+  {% endif %}
+  <form hx-post="/documents/{{ artifact_id }}/approve" hx-target="#processing-result" hx-swap="innerHTML" hx-indicator="#approval-loader">
+    <label for="approved_by">Approver</label>
+    <input id="approved_by" name="approved_by" required>
+    <button type="submit">Approve and publish Copilot Markdown</button>
+    <span id="approval-loader" class="loader htmx-indicator" role="status">Publishing Copilot Markdown…</span>
+  </form>
+</section>

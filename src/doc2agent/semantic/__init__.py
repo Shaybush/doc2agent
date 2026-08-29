@@ -5,7 +5,11 @@ from doc2agent.semantic.artifact_paths import (
 )
 from doc2agent.semantic.candidate import CandidateBuilder, KnowledgeCandidate
 from doc2agent.semantic.candidate_review import CandidateReview, CandidateReviewer
-from doc2agent.semantic.copilot_context import CopilotContextResult, TopicRenderer
+from doc2agent.semantic.copilot_context import (
+    CopilotContextResult,
+    TopicRenderer,
+    copilot_context_output_path,
+)
 from doc2agent.semantic.enrichment_patch import (
     EnrichmentPatch,
     EnrichmentPatchValidator,
@@ -53,6 +57,7 @@ __all__ = [
     "CandidateReview",
     "CandidateReviewer",
     "CopilotContextResult",
+    "copilot_context_output_path",
     "EvidenceRef",
     "KnowledgeDocument",
     "KnowledgeCandidate",
