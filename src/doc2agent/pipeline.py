@@ -6,18 +6,20 @@ from pathlib import Path
 
 from doc2agent.analyzer import StructuralAnalyzer
 from doc2agent.converter import Converter, ConverterResult
+from doc2agent.ingest import IngestResult
 from doc2agent.normalization.markdown_normalizer import MarkdownNormalizer
 from doc2agent.security import SecurityGateway
 from doc2agent.security.models import (
     SecurityDecision,
     SecurityResult,
 )
-from doc2agent.validator import DocumentValidator
+from doc2agent.validator import DocumentValidator, ValidationReport
 
 
 class PipelineStatus(StrEnum):
     READY = "ready"
     READY_WITH_REDACTIONS = "ready_with_redactions"
+    INVALID = "invalid"
     BLOCKED = "blocked"
 
 
@@ -25,15 +27,20 @@ class PipelineStatus(StrEnum):
 class PipelineResult:
     status: PipelineStatus
     converted: ConverterResult
+    source_manifest_json: Path
     normalized_markdown: Path
     document_json: Path
     validation_json: Path
+    validation: ValidationReport
     security_json: Path
     security: SecurityResult
 
     @property
     def can_send_to_llm(self) -> bool:
-        return self.status != PipelineStatus.BLOCKED
+        return self.status in {
+            PipelineStatus.READY,
+            PipelineStatus.READY_WITH_REDACTIONS,
+        }
 
 
 class Doc2AgentPipeline:
@@ -66,10 +73,26 @@ class Doc2AgentPipeline:
 
     def run(
         self,
-        source: str | Path,
+        ingested: IngestResult,
         output_root: str | Path = "output",
     ) -> PipelineResult:
+        if not ingested.accepted or ingested.source_path is None:
+            raise ValueError("Pipeline requires an accepted ingested source")
+
+        source = ingested.source_path
         output_root = Path(output_root)
+
+        source_manifest = ingested.manifest
+        source_manifest_path = (
+            output_root
+            / "source-manifest"
+            / f"{Path(source).stem}.source-manifest.json"
+        )
+        source_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        source_manifest_path.write_text(
+            source_manifest.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
 
         # 1. Office document -> raw Markdown
         converted = self.converter.convert(
@@ -106,6 +129,10 @@ class Doc2AgentPipeline:
         document = self.analyzer.analyze(
             normalized_path,
             metadata_path=converted.metadata,
+        )
+        document = StructuralAnalyzer.with_source_manifest(
+            document,
+            source_manifest,
         )
 
         structured_dir = output_root / "structured"
@@ -166,9 +193,13 @@ class Doc2AgentPipeline:
             encoding="utf-8",
         )
 
-        # 8. Determine whether the document may be sent to an LLM
+        # 8. Determine whether the document may be sent to an LLM.
+        # Security blocks take precedence so that the externally visible
+        # decision never hides a security violation.
         if security_result.decision == SecurityDecision.BLOCK:
             status = PipelineStatus.BLOCKED
+        elif not report.valid:
+            status = PipelineStatus.INVALID
         elif security_result.decision == SecurityDecision.REDACT:
             status = PipelineStatus.READY_WITH_REDACTIONS
         else:
@@ -177,9 +208,11 @@ class Doc2AgentPipeline:
         return PipelineResult(
             status=status,
             converted=converted,
+            source_manifest_json=source_manifest_path,
             normalized_markdown=normalized_path,
             document_json=document_json,
             validation_json=validation_json,
+            validation=report,
             security_json=security_json,
             security=security_result,
         )

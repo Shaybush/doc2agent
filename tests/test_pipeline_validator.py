@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from doc2agent.ingest import IngestService
 from doc2agent.pipeline import Doc2AgentPipeline
-
 
 FIXTURE = (
     Path(__file__).parent
@@ -22,7 +22,10 @@ def test_pipeline_creates_validation_report(
     )
 
     result = Doc2AgentPipeline().run(
-        FIXTURE,
+        IngestService(tmp_path / "storage").ingest(
+            FIXTURE,
+            approve_review=True,
+        ),
         tmp_path / "output",
     )
 

@@ -8,13 +8,15 @@ from typing import Any
 
 from doc2agent.analyzer.builders import build_section_tree
 from doc2agent.analyzer.language import detect_direction, detect_language
+from doc2agent.artifacts import canonical_json_sha256
 from doc2agent.models.document import (
     AnalyzedDocument,
     ContentBlock,
+    Direction,
     DocumentInfo,
     Section,
 )
-
+from doc2agent.source_manifest import SourceManifest
 
 _HEADING_RE = re.compile(
     r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$"
@@ -50,6 +52,7 @@ class StructuralAnalyzer:
         markdown_path: str | Path,
         *,
         metadata_path: str | Path | None = None,
+        source_manifest: SourceManifest | None = None,
     ) -> AnalyzedDocument:
         markdown_path = Path(markdown_path)
 
@@ -65,6 +68,7 @@ class StructuralAnalyzer:
             text,
             markdown_path=markdown_path,
             metadata=metadata,
+            source_manifest=source_manifest,
         )
 
     def analyze_text(
@@ -73,9 +77,11 @@ class StructuralAnalyzer:
         *,
         markdown_path: str | Path = "document.md",
         metadata: dict[str, Any] | None = None,
+        source_manifest: SourceManifest | None = None,
     ) -> AnalyzedDocument:
         markdown_path = Path(markdown_path)
         metadata = metadata or {}
+        source_directions = self._source_directions(metadata)
 
         lines = text.splitlines()
 
@@ -98,6 +104,7 @@ class StructuralAnalyzer:
             1,
             preamble_end,
             scope_id="preamble",
+            source_directions=source_directions,
         )
 
         flat_sections: list[Section] = []
@@ -152,6 +159,7 @@ class StructuralAnalyzer:
                 body_start,
                 direct_body_end,
                 scope_id=section_id,
+                source_directions=source_directions,
             )
 
             flat_sections.append(
@@ -161,7 +169,10 @@ class StructuralAnalyzer:
                     title=title,
                     path=path,
                     language=detect_language(title),
-                    direction=detect_direction(title),
+                    direction=(
+                        source_directions.get(self._normalise_source_text(title))
+                        or detect_direction(title)
+                    ),
                     start_line=line_no,
                     end_line=end_line,
                     blocks=blocks,
@@ -210,12 +221,50 @@ class StructuralAnalyzer:
             direction=detect_direction(text),
         )
 
-        return AnalyzedDocument(
+        analyzed_document = AnalyzedDocument(
+            source_manifest=source_manifest,
             document=document,
             preamble=preamble,
             sections=build_section_tree(
                 flat_sections
             ),
+        )
+        return self._with_structural_hash(analyzed_document)
+
+    @staticmethod
+    def with_source_manifest(
+        document: AnalyzedDocument,
+        source_manifest: SourceManifest,
+    ) -> AnalyzedDocument:
+        """Bind an existing structural result to an immutable source."""
+
+        return StructuralAnalyzer._with_structural_hash(
+            document.model_copy(
+                update={
+                    "source_manifest": source_manifest,
+                    "structural_sha256": None,
+                }
+            )
+        )
+
+    @staticmethod
+    def _with_structural_hash(
+        document: AnalyzedDocument,
+    ) -> AnalyzedDocument:
+        structural_payload = document.model_dump(
+            mode="json",
+            exclude_none=True,
+            exclude={"structural_sha256"},
+        )
+        source_manifest = structural_payload.get("source_manifest")
+        if source_manifest is not None:
+            source_manifest.pop("received_at", None)
+        return document.model_copy(
+            update={
+                "structural_sha256": canonical_json_sha256(
+                    structural_payload
+                )
+            }
         )
 
     def write_json(
@@ -454,6 +503,7 @@ class StructuralAnalyzer:
         end_line: int,
         *,
         scope_id: str,
+        source_directions: dict[str, Direction],
     ) -> list[ContentBlock]:
 
         if (
@@ -552,6 +602,10 @@ class StructuralAnalyzer:
                             language_hint
                             or None
                         ),
+                        source_direction=self._source_direction_for(
+                            source_directions,
+                            text,
+                        ),
                     )
                 )
 
@@ -590,6 +644,10 @@ class StructuralAnalyzer:
                         i,
                         alt=alt,
                         src=src,
+                        source_direction=self._source_direction_for(
+                            source_directions,
+                            alt,
+                        ),
                     )
                 )
 
@@ -658,6 +716,11 @@ class StructuralAnalyzer:
                         i - 1,
                         headers=headers,
                         rows=rows,
+                        source_direction=self._source_direction_for(
+                            source_directions,
+                            *headers,
+                            *(cell for row in rows for cell in row),
+                        ),
                     )
                 )
 
@@ -716,6 +779,10 @@ class StructuralAnalyzer:
                         list_start,
                         i - 1,
                         items=items,
+                        source_direction=self._source_direction_for(
+                            source_directions,
+                            *items,
+                        ),
                     )
                 )
 
@@ -793,6 +860,10 @@ class StructuralAnalyzer:
                         paragraph_start,
                         i - 1,
                         text=paragraph_text,
+                        source_direction=self._source_direction_for(
+                            source_directions,
+                            paragraph_text,
+                        ),
                     )
                 )
 
@@ -822,6 +893,7 @@ class StructuralAnalyzer:
         src: str | None = None,
         headers: list[str] | None = None,
         rows: list[list[str]] | None = None,
+        source_direction: Direction | None = None,
     ) -> ContentBlock:
 
         items = items or []
@@ -878,12 +950,41 @@ class StructuralAnalyzer:
             language=detect_language(
                 language_text
             ),
-            direction=detect_direction(
-                language_text
-            ),
+            direction=source_direction or detect_direction(language_text),
             start_line=start_line,
             end_line=end_line,
         )
+
+    @staticmethod
+    def _source_directions(metadata: dict[str, Any]) -> dict[str, Direction]:
+        result: dict[str, Direction] = {}
+        layout = metadata.get("paragraph_layout", [])
+        if not isinstance(layout, list):
+            return result
+        for item in layout:
+            if not isinstance(item, dict) or item.get("direction") != "rtl":
+                continue
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                result[StructuralAnalyzer._normalise_source_text(text)] = "rtl"
+        return result
+
+    @staticmethod
+    def _source_direction_for(
+        source_directions: dict[str, Direction],
+        *values: str,
+    ) -> Direction | None:
+        directions = {
+            source_directions.get(StructuralAnalyzer._normalise_source_text(value))
+            for value in values
+            if value.strip()
+        }
+        directions.discard(None)
+        return "rtl" if directions == {"rtl"} else None
+
+    @staticmethod
+    def _normalise_source_text(value: str) -> str:
+        return " ".join(value.split())
 
     # =========================================================
     # STABLE IDS

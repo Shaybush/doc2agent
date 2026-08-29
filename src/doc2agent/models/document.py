@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from doc2agent.source_manifest import SourceManifest
 
 Direction = Literal["ltr", "rtl", "mixed", "auto"]
 
@@ -117,6 +118,13 @@ class AnalyzedDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: str = "1.0"
+
+    source_manifest: SourceManifest | None = None
+
+    structural_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
     document: DocumentInfo
 

@@ -1,20 +1,71 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from doc2agent.analyzer import StructuralAnalyzer
+from doc2agent.ingest import IngestDecision, IngestResult, IngestService
+from doc2agent.models.document import AnalyzedDocument
 from doc2agent.pipeline import (
     Doc2AgentPipeline,
     PipelineStatus,
 )
-
+from doc2agent.source_manifest import SourceManifest
 
 FIXTURE = (
     Path(__file__).parent
     / "fixtures"
     / "hebrew_test_document.docx"
 )
+
+
+def _ingest(source: Path, storage: Path):
+    result = IngestService(storage).ingest(source, approve_review=True)
+    assert result.accepted
+    return result
+
+
+def _copy_fixture_with_replaced_text(
+    tmp_path: Path,
+    replacement: str,
+) -> Path:
+    destination = tmp_path / "security-fixture.docx"
+    target = b"<w:t>OpenAI</w:t>"
+    replacement_xml = (
+        f"<w:t>{replacement}</w:t>".encode()
+    )
+
+    with zipfile.ZipFile(FIXTURE) as source_archive:
+        with zipfile.ZipFile(destination, "w") as destination_archive:
+            for entry in source_archive.infolist():
+                content = source_archive.read(entry.filename)
+
+                if entry.filename == "word/document.xml":
+                    assert target in content
+                    content = content.replace(target, replacement_xml)
+
+                destination_archive.writestr(entry, content)
+
+    return destination
+
+
+class DuplicateIdAnalyzer(StructuralAnalyzer):
+    def analyze(
+        self,
+        markdown_path: str | Path,
+        *,
+        metadata_path: str | Path | None = None,
+    ) -> AnalyzedDocument:
+        document = super().analyze(
+            markdown_path,
+            metadata_path=metadata_path,
+        )
+        document.sections[0].id = document.document.id
+        return document
 
 
 def _flatten_sections(
@@ -57,7 +108,7 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
     output_root = tmp_path / "output"
 
     result = Doc2AgentPipeline().run(
-        FIXTURE,
+        _ingest(FIXTURE, tmp_path / "storage"),
         output_root,
     )
 
@@ -68,6 +119,7 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
     # Files were produced
     assert result.converted.markdown.exists()
     assert result.converted.metadata.exists()
+    assert result.source_manifest_json.exists()
     assert result.normalized_markdown.exists()
     assert result.document_json.exists()
     assert result.validation_json.exists()
@@ -104,6 +156,13 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
     )
 
     assert document["schema_version"] == "1.0"
+    assert document["source_manifest"]["source_id"].startswith("sha256:")
+    assert len(document["structural_sha256"]) == 64
+
+    source_manifest = json.loads(
+        result.source_manifest_json.read_text(encoding="utf-8")
+    )
+    assert source_manifest == document["source_manifest"]
 
     # security.json
     security = json.loads(
@@ -121,6 +180,13 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
     assert info["source_format"] == "docx"
     assert info["language"] == "mixed"
     assert info["direction"] == "mixed"
+
+    metadata = json.loads(result.converted.metadata.read_text(encoding="utf-8"))
+    assert {
+        "text": "Converter יוצר Markdown מנורמל.",
+        "direction": "rtl",
+        "alignment": "right",
+    } in metadata["paragraph_layout"]
 
     assert (
         Path(info["markdown"])
@@ -206,6 +272,7 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
         "StructuralAnalyzer יוצר document.json.",
         "Validator בודק שהמבנה עקבי.",
     ]
+    assert ordered["direction"] == "rtl"
 
     # Table
     table = next(
@@ -265,3 +332,105 @@ def test_full_docx_pipeline(tmp_path: Path) -> None:
             section["end_line"]
             >= section["start_line"]
         )
+
+
+def test_pipeline_returns_ready_with_redactions(
+    tmp_path: Path,
+) -> None:
+    source = _copy_fixture_with_replaced_text(
+        tmp_path,
+        "security@example.com",
+    )
+
+    result = Doc2AgentPipeline().run(
+        _ingest(source, tmp_path / "storage"),
+        tmp_path / "output",
+    )
+
+    assert result.status == PipelineStatus.READY_WITH_REDACTIONS
+    assert result.can_send_to_llm is True
+
+    security = json.loads(
+        result.security_json.read_text(encoding="utf-8")
+    )
+
+    assert security["decision"] == "redact"
+    assert any(
+        finding["kind"] == "email"
+        for finding in security["findings"]
+    )
+    assert "[REDACTED_EMAIL]" in json.dumps(
+        security["sanitized_document"],
+    )
+
+
+def test_pipeline_returns_blocked_for_internal_url(
+    tmp_path: Path,
+) -> None:
+    source = _copy_fixture_with_replaced_text(
+        tmp_path,
+        "http://localhost/admin",
+    )
+
+    result = Doc2AgentPipeline().run(
+        _ingest(source, tmp_path / "storage"),
+        tmp_path / "output",
+    )
+
+    assert result.status == PipelineStatus.BLOCKED
+    assert result.can_send_to_llm is False
+
+    security = json.loads(
+        result.security_json.read_text(encoding="utf-8")
+    )
+
+    assert security["decision"] == "block"
+    assert any(
+        finding["kind"] == "internal_url"
+        for finding in security["findings"]
+    )
+    assert "[BLOCKED_INTERNAL_URL]" in json.dumps(
+        security["sanitized_document"],
+    )
+
+
+def test_pipeline_returns_invalid_for_validation_errors(
+    tmp_path: Path,
+) -> None:
+    result = Doc2AgentPipeline(
+        analyzer=DuplicateIdAnalyzer(),
+    ).run(
+        _ingest(FIXTURE, tmp_path / "storage"),
+        tmp_path / "output",
+    )
+
+    assert result.status == PipelineStatus.INVALID
+    assert result.can_send_to_llm is False
+    assert result.validation.valid is False
+    assert any(
+        error.code == "DUPLICATE_ID"
+        for error in result.validation.errors
+    )
+
+    security = json.loads(
+        result.security_json.read_text(encoding="utf-8")
+    )
+
+    assert security["decision"] == "pass"
+
+
+def test_pipeline_rejects_a_source_that_did_not_pass_ingest(
+    tmp_path: Path,
+) -> None:
+    rejected = IngestResult(
+        decision=IngestDecision.REQUIRES_REVIEW,
+        manifest=SourceManifest.from_path(FIXTURE),
+        diagnostics=(),
+        document_id=None,
+        source_path=None,
+        manifest_path=None,
+        duplicate=False,
+    )
+
+    with pytest.raises(ValueError, match="accepted ingested source"):
+        Doc2AgentPipeline().run(rejected, tmp_path / "output")

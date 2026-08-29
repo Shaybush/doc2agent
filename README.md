@@ -59,7 +59,26 @@ Result:
 output/structured/sample.document.json
 ```
 
-## 5. Run the complete pipeline
+## 5. Accept a DOCX safely
+
+Before processing a DOCX, save an immutable application-owned copy:
+
+```bash
+doc2agent ingest "input/my-document.docx"
+```
+
+The command checks the DOCX package without extracting it. A document with
+macros, a corrupt ZIP package, or unsafe archive paths is blocked. External
+relationships require review and are never fetched. Accepted files are stored
+by content hash in `storage/sources/`, and `storage/source-catalog.json` maps
+their versions to a logical document ID.
+
+When an edited DOCX is accepted again from the same path, it automatically
+becomes the next version of that logical document. `--document-id` is only an
+advanced override for a renamed or moved file that must be connected to an
+existing document history.
+
+## 6. Run the complete pipeline
 
 Put a `.doc`, `.docx`, or `.rtf` file into `input/`, then run:
 
@@ -70,15 +89,21 @@ doc2agent pipeline "input/my-document.docx"
 Output:
 
 ```text
-output/
+storage/artifacts/sha256-.../
 ├── raw/
 │   └── my-document.md
 ├── media/
 │   └── my-document/
 ├── metadata/
 │   └── my-document.json
-└── structured/
-    └── my-document.document.json
+├── normalized/
+│   └── my-document.md
+├── structured/
+│   └── my-document.document.json
+├── validation/
+│   └── my-document.validation.json
+└── security/
+    └── my-document.security.json
 ```
 
 ## Commands
@@ -87,8 +112,90 @@ output/
 doc2agent --help
 doc2agent convert input/file.docx
 doc2agent analyze output/raw/file.md --metadata output/metadata/file.json
+doc2agent ingest input/file.docx
 doc2agent pipeline input/file.docx
+doc2agent delete --document-id document:... --yes
+doc2agent export-support --document-id document:...
+doc2agent evaluate-semantic tests/fixtures/semantic-evaluation.md --cases tests/fixtures/semantic-evaluation-cases.json
 ```
+
+## Offline diagnostics
+
+On an isolated computer, export a diagnostic ZIP after an error. It contains
+application/runtime details, hashes, validation and security summaries, but does
+not contain the source DOCX, Markdown, `document.json`, approved knowledge,
+`sanitized_document` payload, or raw error logs.
+
+```bash
+doc2agent export-support --document-id "document:..."
+```
+
+The command prints the ZIP path under `support-bundles/`. Review the ZIP
+according to your transfer policy before moving it to another system. If a raw
+traceback is also needed, review and transfer it separately under that policy;
+it is deliberately not added to the bundle. If reproducing a problem requires
+document content, create a separate approved anonymized fixture rather than
+adding the original DOCX to the bundle.
+
+If `pipeline` reports `requires_review` because of an external relationship,
+inspect the warning and explicitly continue without opening the link:
+
+```bash
+doc2agent pipeline input/file.docx --approve-review
+```
+
+Validate a future provider/LLM proposal without applying it:
+
+```bash
+doc2agent validate-patch patch.json --document structured.document.json
+doc2agent create-candidate patch.json --document structured.document.json
+doc2agent review-candidate candidate.knowledge.json
+doc2agent approve candidate.knowledge.json --by "george"
+doc2agent render-copilot
+```
+
+When more than one document has approved knowledge, select the one to render:
+
+```bash
+doc2agent render-copilot --document-id "document:..."
+```
+
+`pipeline`, `enrich`, and `create-candidate` keep generated artifacts inside
+`storage/artifacts/<source-version>/`. The user-facing published result is
+`storage/copilot-context/<source-name>--<document-id>/<source-name>.md`; do not
+manually edit it. A new version of the same logical document replaces only its
+own generated context directory, while documents with the same filename remain
+separate.
+
+Generate a proposed patch only from a validated, security-approved document:
+
+```bash
+doc2agent enrich structured.document.json \
+  --validation validation.json \
+  --security security.json
+```
+
+DeepSeek is the default profile. Set `DEEPSEEK_API_KEY` outside the repository.
+For any other OpenAI-compatible API, supply a provider name, model, base URL,
+and the name of its environment variable (never the key itself):
+
+```bash
+doc2agent enrich structured.document.json \
+  --validation validation.json \
+  --security security.json \
+  --provider local \
+  --model my-model \
+  --base-url http://localhost:8000/v1 \
+  --api-key-env LOCAL_MODEL_API_KEY
+```
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Pipeline and artifact contract](docs/pipeline-and-artifacts.md)
+- [Canonical `document.json` contract](docs/document-json.md)
+- [Optional `knowledge.json` contract](docs/knowledge-json.md)
+- [`EnrichmentPatch` contract](docs/enrichment-patch.md)
 
 ## Current StructuralAnalyzer support
 
@@ -124,4 +231,7 @@ The structural analyzer is deterministic and contains no LLM. It converts Markdo
 
 ### Later
 
-The next stage will be a `SemanticAnalyzer`, producing richer `knowledge.json`. Only after the document foundation is reliable should RAG/Search and Graph adapters be connected.
+`SemanticAnalyzer` now has an isolated, provider-neutral `knowledge.json`
+contract with deterministic no-op and fixture providers. It is not connected to
+the runtime pipeline and makes no LLM calls. Only after its quality is evaluated
+should RAG/Search and Graph adapters be connected.

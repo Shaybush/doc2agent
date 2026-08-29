@@ -1,6 +1,7 @@
 from doc2agent.security import SecurityAction, SecurityGateway
 from doc2agent.security.models import SecurityDecision
 
+
 def test_allows_document_without_sensitive_data():
     gateway = SecurityGateway()
 
@@ -147,20 +148,39 @@ def test_does_not_modify_original_document():
         "text": "Email: test@example.com"
     }
 
-    def test_blocks_document_with_internal_url():
-        gateway = SecurityGateway()
 
-        document = {
-            "text": "Open http://localhost/admin"
+def test_preserves_immutable_contract_hashes() -> None:
+    gateway = SecurityGateway()
+    source_id = "sha256:4111111111111111111111111111111111111111111111111111111111111111"
+    structural_sha256 = "4111111111111111111111111111111111111111111111111111111111111111"
+
+    result = gateway.process(
+        {
+            "source_manifest": {"source_id": source_id},
+            "structural_sha256": structural_sha256,
+            "text": "Card: 4111 1111 1111 1111",
         }
+    )
 
-        result = gateway.process(document)
+    assert result.sanitized_document["source_manifest"]["source_id"] == source_id
+    assert result.sanitized_document["structural_sha256"] == structural_sha256
+    assert result.sanitized_document["text"] == "Card: [REDACTED_CREDIT_CARD]"
 
-        assert result.decision == SecurityDecision.BLOCK
-        assert result.blocked is True
-        assert (
-            result.sanitized_document["text"]
-            == "Open [BLOCKED_INTERNAL_URL]"
-        )
-        assert result.findings[0].kind == "internal_url"
-        assert result.findings[0].action == SecurityAction.BLOCK
+
+def test_blocks_document_with_internal_url():
+    gateway = SecurityGateway()
+
+    document = {
+        "text": "Open http://localhost/admin"
+    }
+
+    result = gateway.process(document)
+
+    assert result.decision == SecurityDecision.BLOCK
+    assert result.blocked is True
+    assert (
+        result.sanitized_document["text"]
+        == "Open [BLOCKED_INTERNAL_URL]"
+    )
+    assert result.findings[0].kind == "internal_url"
+    assert result.findings[0].action == SecurityAction.BLOCK

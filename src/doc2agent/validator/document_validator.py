@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from doc2agent.models.document import AnalyzedDocument, ContentBlock, Section
 
-
 Severity = Literal["error", "warning"]
 
 

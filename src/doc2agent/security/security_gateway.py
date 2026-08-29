@@ -13,6 +13,11 @@ from .models import (
 
 
 class SecurityGateway:
+    IMMUTABLE_CONTRACT_PATHS = {
+        "$.source_manifest.source_id",
+        "$.structural_sha256",
+    }
+
     EMAIL_PATTERN = re.compile(
         r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
     )
@@ -142,6 +147,8 @@ class SecurityGateway:
             ]
 
         if isinstance(value, str):
+            if path in self.IMMUTABLE_CONTRACT_PATHS:
+                return value
             return self._sanitize_text(
                 text=value,
                 path=path,

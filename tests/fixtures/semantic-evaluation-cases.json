@@ -1,0 +1,65 @@
+[
+  {
+    "id": "requirement-ru",
+    "kind": "requirement",
+    "value": "Система должна сохранять исходный текст.",
+    "source_text": "Система должна сохранять исходный текст.",
+    "origin": "AI_INFERRED"
+  },
+  {
+    "id": "decision-ru",
+    "kind": "decision",
+    "value": "использовать отдельный semantic-layer",
+    "source_text": "Решение: использовать отдельный semantic-layer.",
+    "origin": "AI_INFERRED"
+  },
+  {
+    "id": "action-item-ru",
+    "kind": "action_item",
+    "value": "добавить contract-тесты",
+    "source_text": "Действие: добавить contract-тесты.",
+    "origin": "AI_INFERRED"
+  },
+  {
+    "id": "requirement-en",
+    "kind": "requirement",
+    "value": "The service must preserve source text.",
+    "source_text": "The service must preserve source text.",
+    "origin": "AI_INFERRED"
+  },
+  {
+    "id": "decision-en",
+    "kind": "decision",
+    "value": "use an isolated semantic layer",
+    "source_text": "Decision: use an isolated semantic layer.",
+    "origin": "AI_INFERRED"
+  },
+  {
+    "id": "action-item-en",
+    "kind": "action_item",
+    "value": "add contract tests",
+    "source_text": "Action item: add contract tests.",
+    "origin": "AI_INFERRED"
+  },
+  {
+    "id": "requirement-he",
+    "kind": "requirement",
+    "value": "המערכת חייבת לשמור את טקסט המקור.",
+    "source_text": "המערכת חייבת לשמור את טקסט המקור.",
+    "origin": "AI_INFERRED"
+  },
+  {
+    "id": "decision-he",
+    "kind": "decision",
+    "value": "להשתמש בשכבה סמנטית נפרדת",
+    "source_text": "החלטה: להשתמש בשכבה סמנטית נפרדת.",
+    "origin": "AI_INFERRED"
+  },
+  {
+    "id": "action-item-he",
+    "kind": "action_item",
+    "value": "להוסיף בדיקות חוזה",
+    "source_text": "פעולה: להוסיף בדיקות חוזה.",
+    "origin": "AI_INFERRED"
+  }
+]

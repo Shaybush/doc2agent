@@ -4,12 +4,15 @@ import json
 import re
 import shutil
 import unicodedata
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote
+from xml.etree import ElementTree
 
 SUPPORTED_EXTENSIONS = {".doc", ".docx", ".rtf"}
 _IMAGE_LINK_RE = re.compile(r"(!\[[^\]]*\]\()([^\s)]+)([^)]*\))")
+_WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,7 @@ class Converter:
             "media": str(media_dir),
             "language": "und",
             "direction": "auto",
+            "paragraph_layout": self._docx_paragraph_layout(source),
             "converter": "aspose-words-foss",
         }
         metadata_path.write_text(
@@ -100,6 +104,46 @@ class Converter:
             media_dir=media_dir,
             metadata=metadata_path,
         )
+
+    @staticmethod
+    def _docx_paragraph_layout(source: Path) -> list[dict[str, str]]:
+        """Preserve DOCX paragraph direction that Markdown cannot encode."""
+
+        if source.suffix.lower() != ".docx":
+            return []
+
+        try:
+            with zipfile.ZipFile(source) as archive:
+                document_xml = archive.read("word/document.xml")
+        except (KeyError, zipfile.BadZipFile):
+            return []
+
+        namespace = f"{{{_WORD_NAMESPACE}}}"
+        root = ElementTree.fromstring(document_xml)
+        layouts: list[dict[str, str]] = []
+        for paragraph in root.iter(f"{namespace}p"):
+            properties = paragraph.find(f"{namespace}pPr")
+            if properties is None or properties.find(f"{namespace}bidi") is None:
+                continue
+            text = "".join(
+                node.text or ""
+                for node in paragraph.iter(f"{namespace}t")
+            ).strip()
+            if not text:
+                continue
+            alignment = properties.find(f"{namespace}jc")
+            layouts.append(
+                {
+                    "text": text,
+                    "direction": "rtl",
+                    "alignment": (
+                        alignment.get(f"{namespace}val", "")
+                        if alignment is not None
+                        else ""
+                    ),
+                }
+            )
+        return layouts
 
     def _normalize_media(
         self,
