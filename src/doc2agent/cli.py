@@ -14,6 +14,7 @@ from doc2agent.semantic import (
     ApprovalService,
     CandidateBuilder,
     CandidateReviewer,
+    EnrichmentGoldenRunner,
     EnrichmentPatch,
     EnrichmentPatchValidator,
     KnowledgeCandidate,
@@ -396,6 +397,70 @@ def enrich(
     typer.echo(f"enrichment-patch.json: {output_path}")
     typer.echo(f"Provider: {settings.name}")
     typer.echo(f"Model: {settings.model}")
+
+
+@app.command("evaluate-enrichment")
+def evaluate_enrichment(
+    source: Path = typer.Argument(..., exists=True, dir_okay=False),
+    golden: Path = typer.Option(..., "--golden", exists=True, dir_okay=False),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+    approve_review: bool = typer.Option(False, "--approve-review"),
+    provider: str = typer.Option("deepseek", "--provider"),
+    model: str | None = typer.Option(None, "--model"),
+    base_url: str | None = typer.Option(None, "--base-url"),
+    api_key_environment: str = typer.Option("DEEPSEEK_API_KEY", "--api-key-env"),
+) -> None:
+    """Run one provider patch against a v2 golden fixture."""
+
+    ingest_service = IngestService(storage)
+    ingested = ingest_service.ingest(source, approve_review=approve_review)
+    if not ingested.accepted:
+        raise typer.BadParameter(
+            "DOCX intake must pass before enrichment evaluation"
+        )
+
+    artifact_root = storage / "artifacts" / ingested.manifest.source_id.replace(":", "-")
+    pipeline_result = Doc2AgentPipeline().run(ingested, artifact_root)
+    ingest_service.record_artifact_root(ingested.manifest.source_id, artifact_root)
+    if not pipeline_result.can_send_to_llm:
+        raise typer.BadParameter(
+            f"Pipeline status {pipeline_result.status} cannot be sent to a model"
+        )
+
+    sanitized_document = AnalyzedDocument.model_validate(
+        pipeline_result.security.sanitized_document
+    )
+    try:
+        if provider == "deepseek":
+            settings = deepseek_settings_from_environment(
+                model=model,
+                base_url=base_url,
+            )
+        else:
+            if model is None or base_url is None:
+                raise typer.BadParameter(
+                    "A non-DeepSeek provider requires --model and --base-url"
+                )
+            settings = openai_compatible_settings_from_environment(
+                name=provider,
+                api_key_environment=api_key_environment,
+                base_url=base_url,
+                model=model,
+            )
+        patch = OpenAICompatibleEnrichmentProvider(settings).create_patch(
+            sanitized_document
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise typer.BadParameter(f"Enrichment failed: {exc}") from exc
+
+    report = EnrichmentGoldenRunner().evaluate_patch(
+        patch,
+        sanitized_document,
+        golden,
+    )
+    typer.echo(report.model_dump_json())
+    if not report.passed:
+        raise typer.Exit(code=1)
 
 
 @app.command()

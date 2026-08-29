@@ -10,6 +10,7 @@ from doc2agent.semantic import (
     CandidateBuilder,
     CandidateReviewer,
     EnrichmentPatch,
+    EnrichmentPatchValidator,
     EvidenceRef,
     PatchFact,
 )
@@ -25,9 +26,11 @@ def _candidate():
     )
     block = document.sections[0].blocks[0]
     patch = EnrichmentPatch(
+        schema_version="2.0",
         source_id=document.source_manifest.source_id,
         structural_sha256=document.structural_sha256,
         scope_block_ids=[block.id],
+        reviewed_block_ids=sorted(EnrichmentPatchValidator._block_ids(document)),
         facts=[
             PatchFact(
                 id="fact:requirement",
@@ -57,6 +60,8 @@ def test_candidate_review_shows_fact_and_exact_source_block() -> None:
     assert review.facts[0].evidence[0].section_path == tuple(
         candidate.document.sections[0].path
     )
+    assert review.reviewed_block_ids == tuple(candidate.reviewed_block_ids)
+    assert "Reviewed content blocks: " in CandidateReviewer.render(review)
     assert "lines" in CandidateReviewer.render(review)
 
 

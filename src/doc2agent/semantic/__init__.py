@@ -3,7 +3,12 @@ from doc2agent.semantic.artifact_paths import (
     artifact_root_for_document,
     document_artifact_name,
 )
-from doc2agent.semantic.candidate import CandidateBuilder, KnowledgeCandidate
+from doc2agent.semantic.candidate import (
+    CandidateBuilder,
+    KnowledgeCandidate,
+    candidate_contract_report,
+    validate_candidate_contract,
+)
 from doc2agent.semantic.candidate_review import CandidateReview, CandidateReviewer
 from doc2agent.semantic.copilot_context import (
     CopilotContextResult,
@@ -26,6 +31,9 @@ from doc2agent.semantic.enrichment_provider import (
     openai_compatible_settings_from_environment,
 )
 from doc2agent.semantic.evaluation import (
+    EnrichmentGoldenFixture,
+    EnrichmentGoldenReport,
+    EnrichmentGoldenRunner,
     SemanticEvaluationCase,
     SemanticEvaluationReport,
     SemanticEvaluationRunner,
@@ -33,6 +41,7 @@ from doc2agent.semantic.evaluation import (
 from doc2agent.semantic.models import (
     EvidenceRef,
     KnowledgeDocument,
+    PipelineStep,
     SemanticAnnotation,
     SemanticKind,
 )
@@ -54,6 +63,7 @@ __all__ = [
     "DEEPSEEK_MODEL",
     "document_artifact_name",
     "CandidateBuilder",
+    "candidate_contract_report",
     "CandidateReview",
     "CandidateReviewer",
     "CopilotContextResult",
@@ -66,6 +76,10 @@ __all__ = [
     "OpenAICompatibleSettings",
     "PatchFact",
     "PatchValidationReport",
+    "PipelineStep",
+    "EnrichmentGoldenFixture",
+    "EnrichmentGoldenReport",
+    "EnrichmentGoldenRunner",
     "SemanticEvaluationCase",
     "SemanticEvaluationReport",
     "SemanticEvaluationRunner",
@@ -74,6 +88,7 @@ __all__ = [
     "SemanticKind",
     "SemanticProvider",
     "TopicRenderer",
+    "validate_candidate_contract",
     "deepseek_settings_from_environment",
     "openai_compatible_settings_from_environment",
 ]

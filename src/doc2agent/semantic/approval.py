@@ -9,7 +9,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from doc2agent.artifacts import canonical_json_sha256
-from doc2agent.semantic.candidate import KnowledgeCandidate
+from doc2agent.semantic.candidate import KnowledgeCandidate, validate_candidate_contract
 from doc2agent.semantic.semantic_analyzer import SemanticAnalyzer
 
 
@@ -127,15 +127,6 @@ class ApprovalService:
         if candidate.candidate_sha256 != expected_hash:
             raise ValueError("Candidate hash does not match candidate content")
 
-        document = candidate.document
-        if document.source_manifest is None or not document.structural_sha256:
-            raise ValueError("Candidate document requires source manifest and structural hash")
-        if candidate.source_id != document.source_manifest.source_id:
-            raise ValueError("Candidate source_id does not match candidate document")
-        if candidate.structural_sha256 != document.structural_sha256:
-            raise ValueError("Candidate structural_sha256 does not match candidate document")
-
-        SemanticAnalyzer.validate_annotations(document, candidate.annotations)
         for annotation in candidate.annotations:
             if not annotation.evidence:
                 raise ValueError(
@@ -146,6 +137,8 @@ class ApprovalService:
                     raise ValueError(
                         "Approval requires explicit evidence for every annotation"
                     )
+        validate_candidate_contract(candidate)
+        SemanticAnalyzer.validate_annotations(candidate.document, candidate.annotations)
 
     @staticmethod
     def _atomic_write(path: Path, payload: str) -> None:

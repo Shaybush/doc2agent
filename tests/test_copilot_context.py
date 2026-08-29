@@ -13,8 +13,10 @@ from doc2agent.semantic import (
     ApprovalService,
     CandidateBuilder,
     EnrichmentPatch,
+    EnrichmentPatchValidator,
     EvidenceRef,
     PatchFact,
+    PipelineStep,
     TopicRenderer,
 )
 from doc2agent.source_manifest import SourceManifest
@@ -29,9 +31,11 @@ def _candidate():
     )
     block = document.sections[0].blocks[0]
     patch = EnrichmentPatch(
+        schema_version="2.0",
         source_id=document.source_manifest.source_id,
         structural_sha256=document.structural_sha256,
         scope_block_ids=[block.id],
+        reviewed_block_ids=sorted(EnrichmentPatchValidator._block_ids(document)),
         facts=[
             PatchFact(
                 id="fact:requirement",
@@ -66,9 +70,11 @@ def _rtl_candidate():
     )
     block = document.sections[0].blocks[0]
     patch = EnrichmentPatch(
+        schema_version="2.0",
         source_id=manifest.source_id,
         structural_sha256=document.structural_sha256,
         scope_block_ids=[block.id],
+        reviewed_block_ids=sorted(EnrichmentPatchValidator._block_ids(document)),
         facts=[
             PatchFact(
                 id="fact:decision",
@@ -128,6 +134,109 @@ def test_renderer_isolates_rtl_fact_values_from_ltr_markdown(tmp_path: Path) -> 
     assert "אין צורך ב-LLM בשלב הניתוח המבני." in markdown
     assert "\u2067" not in markdown
     assert "<bdi" not in markdown
+
+
+def test_renderer_writes_architecture_and_pipeline_section(tmp_path: Path) -> None:
+    candidate = _candidate()
+    block = candidate.document.sections[0].blocks[0]
+    patch = EnrichmentPatch(
+        schema_version="2.0",
+        source_id=candidate.source_id,
+        structural_sha256=candidate.structural_sha256,
+        scope_block_ids=[block.id],
+        reviewed_block_ids=sorted(EnrichmentPatchValidator._block_ids(candidate.document)),
+        facts=[
+            PatchFact(
+                id="fact:architecture-pipeline",
+                kind="architecture_pipeline",
+                value="General English paragraph.",
+                evidence=[
+                    EvidenceRef(
+                        source_id=candidate.source_id,
+                        block_id=block.id,
+                        structural_sha256=candidate.structural_sha256,
+                        support="explicit",
+                    )
+                ],
+            )
+        ],
+    )
+
+    architecture_candidate = CandidateBuilder().build(patch, candidate.document)
+    result = TopicRenderer().render(architecture_candidate, tmp_path / "copilot-context")
+    markdown = result.context_path.read_text(encoding="utf-8")
+    index = (result.output_root / "INDEX.md").read_text(encoding="utf-8")
+
+    assert "## Architecture and pipeline" in markdown
+    assert "- General English paragraph." in markdown
+    assert "- Architecture and pipeline: 1" in index
+
+
+def test_renderer_formats_structured_pipeline_step_and_purpose(tmp_path: Path) -> None:
+    source = tmp_path / "pipeline.md"
+    source.write_text(
+        "# Pipeline\n\nThe purpose is reliable conversion.\n\n"
+        "| Component | Input | Output |\n| --- | --- | --- |\n"
+        "| Converter | DOCX | Markdown |\n",
+        encoding="utf-8",
+    )
+    document = StructuralAnalyzer().analyze(
+        source,
+        source_manifest=SourceManifest.from_path(source),
+    )
+    purpose_block, table = document.sections[0].blocks
+    patch = EnrichmentPatch(
+        schema_version="2.0",
+        source_id=document.source_manifest.source_id,
+        structural_sha256=document.structural_sha256,
+        scope_block_ids=[purpose_block.id, table.id],
+        reviewed_block_ids=sorted(EnrichmentPatchValidator._block_ids(document)),
+        facts=[
+            PatchFact(
+                id="fact:purpose",
+                kind="purpose",
+                value="The purpose is reliable conversion.",
+                evidence=[
+                    EvidenceRef(
+                        source_id=document.source_manifest.source_id,
+                        block_id=purpose_block.id,
+                        structural_sha256=document.structural_sha256,
+                        support="explicit",
+                    )
+                ],
+            ),
+            PatchFact(
+                id="fact:pipeline",
+                kind="architecture_pipeline",
+                value="Converter DOCX Markdown",
+                pipeline_step=PipelineStep(
+                    component="Converter",
+                    input="DOCX",
+                    output="Markdown",
+                ),
+                evidence=[
+                    EvidenceRef(
+                        source_id=document.source_manifest.source_id,
+                        block_id=table.id,
+                        structural_sha256=document.structural_sha256,
+                        support="explicit",
+                    )
+                ],
+            ),
+        ],
+    )
+
+    result = TopicRenderer().render(
+        CandidateBuilder().build(patch, document),
+        tmp_path / "copilot-context",
+    )
+    markdown = result.context_path.read_text(encoding="utf-8")
+    index = (result.output_root / "INDEX.md").read_text(encoding="utf-8")
+
+    assert "## Purpose" in markdown
+    assert "- The purpose is reliable conversion." in markdown
+    assert "- Converter: DOCX → Markdown" in markdown
+    assert "- Purpose: 1" in index
 
 
 def test_renderer_preserves_mixed_text_exactly() -> None:

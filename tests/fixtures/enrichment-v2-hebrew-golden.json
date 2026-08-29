@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "required_facts": [
+    {
+      "id": "requirement:heading-hierarchy",
+      "kind": "requirement",
+      "value": "שמירה על היררכיית כותרות.",
+      "evidence_text": "שמירה על היררכיית כותרות."
+    },
+    {
+      "id": "requirement:paragraphs-and-lists",
+      "kind": "requirement",
+      "value": "זיהוי פסקאות ורשימות.",
+      "evidence_text": "זיהוי פסקאות ורשימות."
+    },
+    {
+      "id": "requirement:hebrew-and-english",
+      "kind": "requirement",
+      "value": "שמירה על טקסט בעברית ובאנגלית.",
+      "evidence_text": "שמירה על טקסט בעברית ובאנגלית."
+    },
+    {
+      "id": "requirement:links-tables-images",
+      "kind": "requirement",
+      "value": "שמירה על קישורים, טבלאות ותמונות.",
+      "evidence_text": "שמירה על קישורים, טבלאות ותמונות."
+    },
+    {
+      "id": "requirement:logical-structure",
+      "kind": "requirement",
+      "value": "לאחר ההמרה, המבנה הלוגי של המסמך צריך להישאר ברור: כותרות, פסקאות, רשימות, טבלה, קישור ותמונה.",
+      "evidence_text": "לאחר ההמרה, המבנה הלוגי של המסמך צריך להישאר ברור: כותרות, פסקאות, רשימות, טבלה, קישור ותמונה. אין צורך ב-LLM בשלב הניתוח המבני."
+    },
+    {
+      "id": "decision:no-llm-structural-analysis",
+      "kind": "decision",
+      "value": "אין צורך ב-LLM בשלב הניתוח המבני.",
+      "evidence_text": "לאחר ההמרה, המבנה הלוגי של המסמך צריך להישאר ברור: כותרות, פסקאות, רשימות, טבלה, קישור ותמונה. אין צורך ב-LLM בשלב הניתוח המבני."
+    },
+    {
+      "id": "architecture:component-converter",
+      "kind": "architecture_pipeline",
+      "value": "Converter יוצר Markdown מנורמל.",
+      "evidence_text": "Converter יוצר Markdown מנורמל."
+    },
+    {
+      "id": "architecture:component-structural-analyzer",
+      "kind": "architecture_pipeline",
+      "value": "StructuralAnalyzer יוצר document.json.",
+      "evidence_text": "StructuralAnalyzer יוצר document.json."
+    },
+    {
+      "id": "architecture:component-validator",
+      "kind": "architecture_pipeline",
+      "value": "Validator בודק שהמבנה עקבי.",
+      "evidence_text": "Validator בודק שהמבנה עקבי."
+    },
+    {
+      "id": "architecture:converter",
+      "kind": "architecture_pipeline",
+      "value": "Converter DOCX Markdown",
+      "evidence_row": ["Converter", "DOCX", "Markdown"]
+    },
+    {
+      "id": "architecture:structural-analyzer",
+      "kind": "architecture_pipeline",
+      "value": "StructuralAnalyzer Markdown document.json",
+      "evidence_row": ["StructuralAnalyzer", "Markdown", "document.json"]
+    },
+    {
+      "id": "architecture:llm-enrichment",
+      "kind": "architecture_pipeline",
+      "value": "LLM Enrichment document.json enriched.json",
+      "evidence_row": ["LLM Enrichment", "document.json", "enriched.json"]
+    }
+  ],
+  "forbidden_value_fragments": [
+    "doc2agent_test_image.png",
+    "source_line = 42",
+    "זהו מסמך מלאכותי"
+  ]
+}

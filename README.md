@@ -80,7 +80,9 @@ existing document history.
 
 ## 6. Run the complete pipeline
 
-Put a `.doc`, `.docx`, or `.rtf` file into `input/`, then run:
+The safe complete pipeline currently accepts **DOCX**. `Converter` also supports
+DOC and RTF when used directly, but they do not have the DOCX preflight safety
+guarantee yet. Put a `.docx` file into `input/`, then run:
 
 ```bash
 doc2agent pipeline "input/my-document.docx"
@@ -105,6 +107,24 @@ storage/artifacts/sha256-.../
 └── security/
     └── my-document.security.json
 ```
+
+## 7. Use the Web UI
+
+```bash
+uv run uvicorn doc2agent.web.app:app --reload
+```
+
+Open <http://127.0.0.1:8000>. The UI follows the existing workflow:
+
+```text
+Upload DOCX → deterministic artifacts → Generate candidate → proof review
+→ Approve and publish → final Copilot Markdown
+```
+
+Candidate generation reads the existing server-side `DEEPSEEK_API_KEY`; the
+browser never provides a key. The final Markdown appears only after the current
+UI run explicitly approves and publishes its candidate. See
+[Web UI workflow](docs/web-ui-workflow.md).
 
 ## Commands
 
@@ -196,6 +216,8 @@ doc2agent enrich structured.document.json \
 - [Canonical `document.json` contract](docs/document-json.md)
 - [Optional `knowledge.json` contract](docs/knowledge-json.md)
 - [`EnrichmentPatch` contract](docs/enrichment-patch.md)
+- [Web UI workflow](docs/web-ui-workflow.md)
+- [Implementation roadmap](docs/implementation-roadmap-ru.md)
 
 ## Current StructuralAnalyzer support
 
@@ -231,7 +253,8 @@ The structural analyzer is deterministic and contains no LLM. It converts Markdo
 
 ### Later
 
-`SemanticAnalyzer` now has an isolated, provider-neutral `knowledge.json`
-contract with deterministic no-op and fixture providers. It is not connected to
-the runtime pipeline and makes no LLM calls. Only after its quality is evaluated
-should RAG/Search and Graph adapters be connected.
+The deterministic pipeline makes no LLM calls. Semantic enrichment is a
+separate explicit action: a provider may propose an evidence-linked candidate,
+but only human approval can publish Copilot Markdown. The built-in DeepSeek
+adapter is not an automatic pipeline stage and needs a quality gate before it
+becomes a trusted production default.

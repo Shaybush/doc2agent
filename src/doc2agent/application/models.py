@@ -37,4 +37,5 @@ class ProofFact(BaseModel):
 
 class CandidateProof(BaseModel):
     candidate_sha256: str
+    reviewed_block_ids: list[str]
     facts: list[ProofFact]

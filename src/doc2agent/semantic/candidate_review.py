@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from doc2agent.artifacts import canonical_json_sha256
 from doc2agent.models.document import AnalyzedDocument, ContentBlock, Section
-from doc2agent.semantic.candidate import KnowledgeCandidate
+from doc2agent.semantic.candidate import KnowledgeCandidate, validate_candidate_contract
 from doc2agent.semantic.models import SemanticAnnotation
 from doc2agent.semantic.semantic_analyzer import SemanticAnalyzer
 
@@ -29,6 +29,7 @@ class CandidateReview:
     candidate_sha256: str
     source_id: str
     structural_sha256: str
+    reviewed_block_ids: tuple[str, ...]
     facts: tuple[ReviewedFact, ...]
 
 
@@ -58,6 +59,7 @@ class CandidateReviewer:
             candidate_sha256=candidate.candidate_sha256,
             source_id=candidate.source_id,
             structural_sha256=candidate.structural_sha256,
+            reviewed_block_ids=tuple(candidate.reviewed_block_ids),
             facts=facts,
         )
 
@@ -66,6 +68,7 @@ class CandidateReviewer:
         lines = [
             f"Candidate hash: {review.candidate_sha256}",
             f"Source: {review.source_id}",
+            "Reviewed content blocks: " + ", ".join(review.reviewed_block_ids),
             f"Facts: {len(review.facts)}",
         ]
         for index, fact in enumerate(review.facts, start=1):
@@ -93,16 +96,8 @@ class CandidateReviewer:
         )
         if candidate.candidate_sha256 != expected_hash:
             raise ValueError("Candidate hash does not match candidate content")
-        document = candidate.document
-        if document.source_manifest is None or not document.structural_sha256:
-            raise ValueError("Candidate document requires source manifest and structural hash")
-        if candidate.source_id != document.source_manifest.source_id:
-            raise ValueError("Candidate source_id does not match candidate document")
-        if candidate.structural_sha256 != document.structural_sha256:
-            raise ValueError(
-                "Candidate structural_sha256 does not match candidate document"
-            )
-        SemanticAnalyzer.validate_annotations(document, candidate.annotations)
+        validate_candidate_contract(candidate)
+        SemanticAnalyzer.validate_annotations(candidate.document, candidate.annotations)
 
     @staticmethod
     def blocks_by_id(

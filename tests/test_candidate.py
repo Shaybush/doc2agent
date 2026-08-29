@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from doc2agent import cli
@@ -10,6 +11,7 @@ from doc2agent.analyzer import StructuralAnalyzer
 from doc2agent.semantic import (
     CandidateBuilder,
     EnrichmentPatch,
+    EnrichmentPatchValidator,
     EvidenceRef,
     PatchFact,
 )
@@ -28,9 +30,11 @@ def _document():
 def _patch(document) -> EnrichmentPatch:
     block_id = document.sections[0].blocks[0].id
     return EnrichmentPatch(
+        schema_version="2.0",
         source_id=document.source_manifest.source_id,
         structural_sha256=document.structural_sha256,
         scope_block_ids=[block_id],
+        reviewed_block_ids=sorted(EnrichmentPatchValidator._block_ids(document)),
         facts=[
             PatchFact(
                 id="fact:requirement",
@@ -55,10 +59,22 @@ def test_candidate_is_hash_addressed_and_preserves_document() -> None:
     candidate = CandidateBuilder().build(_patch(document), document)
 
     assert len(candidate.candidate_sha256) == 64
+    assert candidate.schema_version == "2.0"
     assert candidate.source_id == document.source_manifest.source_id
+    assert candidate.reviewed_block_ids == sorted(EnrichmentPatchValidator._block_ids(document))
     assert candidate.document == document
     assert candidate.document is not document
     assert candidate.annotations[0].origin == "AI_INFERRED"
+
+
+def test_candidate_schema_rejects_legacy_version() -> None:
+    document = _document()
+    candidate = CandidateBuilder().build(_patch(document), document)
+    candidate_data = candidate.model_dump(mode="json")
+    candidate_data["schema_version"] = "1.0"
+
+    with pytest.raises(ValidationError, match="schema_version"):
+        candidate.__class__.model_validate(candidate_data)
 
 
 def test_candidate_hash_is_stable_for_identical_patch_and_document() -> None:

@@ -19,10 +19,18 @@ class StubProcessingService:
         self.result = result
         self.sources: list[Path] = []
         self.document_ids: list[str | None] = []
+        self.review_approvals: list[bool] = []
 
-    def process(self, source: Path, *, document_id: str | None = None) -> ProcessingResult:
+    def process(
+        self,
+        source: Path,
+        *,
+        document_id: str | None = None,
+        approve_review: bool = False,
+    ) -> ProcessingResult:
         self.sources.append(source)
         self.document_ids.append(document_id)
+        self.review_approvals.append(approve_review)
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
@@ -30,6 +38,7 @@ class StubProcessingService:
     def generate_candidate(self, result: ProcessingResult) -> CandidateProof:
         return CandidateProof(
             candidate_sha256="b" * 64,
+            reviewed_block_ids=["block:reviewed"],
             facts=[
                 ProofFact(
                     kind="requirement",
@@ -76,6 +85,7 @@ def test_index_returns_upload_page() -> None:
 
     assert response.status_code == 200
     assert "Choose DOC/DOCX" in response.text
+    assert "Links will not be opened or fetched." in response.text
 
 
 def test_valid_docx_upload_returns_markdown_json_and_downloads() -> None:
@@ -91,6 +101,7 @@ def test_valid_docx_upload_returns_markdown_json_and_downloads() -> None:
     assert "Ready for Copilot." in response.text
     assert '"schema_version": "1.0"' in response.text
     assert service.sources[0].name == "example.docx"
+    assert service.review_approvals == [False]
     artifact_id = next(iter(client.app.state.processed_artifacts._items))
 
     markdown = client.get(f"/documents/{artifact_id}/markdown")
@@ -99,7 +110,26 @@ def test_valid_docx_upload_returns_markdown_json_and_downloads() -> None:
     assert markdown.status_code == 200
     assert markdown.text == "# Example\n\nReady for Copilot."
     assert document_json.status_code == 200
-    assert document_json.json()["document_json"]["document"]["title"] == "Example"
+    assert document_json.json()["document"]["title"] == "Example"
+
+
+def test_json_preview_and_download_preserve_hebrew_text() -> None:
+    result = _result().model_copy(
+        update={"document_json": {"document": {"title": "מסמך בדיקה"}}}
+    )
+    client = TestClient(create_app(service=StubProcessingService(result)))
+
+    response = client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    assert "מסמך בדיקה" in response.text
+    assert "\\u05de" not in response.text
+
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+    downloaded = client.get(f"/documents/{artifact_id}/json")
+    assert "מסמך בדיקה" in downloaded.text
+    assert "\\u05de" not in downloaded.text
 
 
 def test_published_copilot_markdown_is_available_only_when_present() -> None:
@@ -130,6 +160,7 @@ def test_candidate_proof_can_be_reviewed_then_approved_and_published() -> None:
     review = client.post(f"/documents/{artifact_id}/candidate")
     assert review.status_code == 200
     assert "Candidate review / proof" in review.text
+    assert "Reviewed content blocks: <code>block:reviewed</code>" in review.text
     assert "lines 4–4" in review.text
 
     published = client.post(
@@ -201,3 +232,41 @@ def test_repeat_upload_reuses_document_identity_for_the_browser_session() -> Non
         assert response.status_code == 200
 
     assert service.document_ids == [None, "document:example"]
+
+
+def test_external_link_review_requires_explicit_upload_approval() -> None:
+    class ReviewAwareProcessingService(StubProcessingService):
+        def process(
+            self,
+            source: Path,
+            *,
+            document_id: str | None = None,
+            approve_review: bool = False,
+        ) -> ProcessingResult:
+            if not approve_review:
+                raise DocumentProcessingError(
+                    "Intake", "External relationships require explicit review approval."
+                )
+            return super().process(
+                source,
+                document_id=document_id,
+                approve_review=approve_review,
+            )
+
+    service = ReviewAwareProcessingService(_result())
+    client = TestClient(create_app(service=service))
+
+    unapproved = client.post(
+        "/documents/process",
+        files={"file": ("external.docx", b"document bytes")},
+    )
+    approved = client.post(
+        "/documents/process",
+        data={"approve_review": "true"},
+        files={"file": ("external.docx", b"document bytes")},
+    )
+
+    assert "Stage:</strong> Intake" in unapproved.text
+    assert "External relationships require explicit review approval." in unapproved.text
+    assert "Ready for Copilot." in approved.text
+    assert service.review_approvals == [True]

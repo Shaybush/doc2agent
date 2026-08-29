@@ -11,7 +11,12 @@ from uuid import uuid4
 
 from doc2agent.semantic.candidate import KnowledgeCandidate
 from doc2agent.semantic.candidate_review import CandidateReviewer
-from doc2agent.semantic.models import SemanticAnnotation
+from doc2agent.semantic.models import (
+    COPILOT_CONTEXT_KINDS,
+    COPILOT_CONTEXT_LABELS,
+    SemanticAnnotation,
+    copilot_fact_value,
+)
 
 
 def copilot_context_output_path(
@@ -47,7 +52,7 @@ class CopilotContextResult:
 class TopicRenderer:
     """Render a deterministic Copilot context only from an approved snapshot."""
 
-    renderer_version = "5"
+    renderer_version = "7"
 
     def render(
         self,
@@ -134,7 +139,7 @@ class TopicRenderer:
         ]
 
     def _index_markdown(self, approved: KnowledgeCandidate) -> str:
-        counts = {kind: 0 for kind in ("requirement", "decision", "action_item")}
+        counts = {kind: 0 for kind in COPILOT_CONTEXT_KINDS}
         for annotation in approved.annotations:
             counts[annotation.kind] += 1
         return "\n".join(
@@ -148,8 +153,10 @@ class TopicRenderer:
                 "## Available context",
                 "",
                 f"- [Approved knowledge]({self._context_filename(approved)})",
+                f"- Purpose: {counts['purpose']}",
                 f"- Requirements: {counts['requirement']}",
                 f"- Decisions: {counts['decision']}",
+                f"- Architecture and pipeline: {counts['architecture_pipeline']}",
                 f"- Action items: {counts['action_item']}",
                 "",
             ]
@@ -157,20 +164,15 @@ class TopicRenderer:
 
     def _agent_markdown(self, approved: KnowledgeCandidate) -> str:
         lines = [*self._header(approved), "", "# Approved knowledge", ""]
-        labels = {
-            "requirement": "Requirements",
-            "decision": "Decisions",
-            "action_item": "Action items",
-        }
         annotations = sorted(
             approved.annotations,
             key=lambda item: (item.kind, item.id, item.value),
         )
-        for kind in ("requirement", "decision", "action_item"):
+        for kind in COPILOT_CONTEXT_KINDS:
             facts = [item for item in annotations if item.kind == kind]
             if not facts:
                 continue
-            lines.extend([f"## {labels[kind]}", ""])
+            lines.extend([f"## {COPILOT_CONTEXT_LABELS[kind]}", ""])
             for fact in facts:
                 lines.append(f"- {self._fact_value_markdown(fact)}")
             lines.append("")
@@ -180,7 +182,7 @@ class TopicRenderer:
     def _fact_value_markdown(
         fact: SemanticAnnotation,
     ) -> str:
-        return fact.value
+        return copilot_fact_value(fact)
 
     @staticmethod
     def _context_filename(approved: KnowledgeCandidate) -> str:

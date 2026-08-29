@@ -46,8 +46,9 @@ structure.
 | Field | Rule |
 | --- | --- |
 | `id` | Non-empty and unique within `annotations`; owned by the provider. |
-| `kind` | One of `requirement`, `decision`, or `action_item`. |
+| `kind` | One of `purpose`, `requirement`, `decision`, `action_item`, or `architecture_pipeline`. |
 | `value` | Non-empty normalized statement, without inventing facts absent from its evidence. |
+| `pipeline_step` | Optional exact `component`, `input`, and `output` from an evidence-table row; only for `architecture_pipeline`. |
 | `evidence` | New contract: at least one `EvidenceRef` for a valid source block and structural revision. |
 | `source_ids` | Legacy migration field; IDs must reference the embedded canonical document. |
 | `origin` | `AI_INFERRED` for a provider's extraction; `VERIFIED` only after an external verification step. |
@@ -57,6 +58,12 @@ decision, and action item in Russian, English, and Hebrew. It is stored in
 `tests/fixtures/semantic-evaluation-cases.json` with corresponding source text
 in `tests/fixtures/semantic-evaluation.md`. A future LLM provider must be
 evaluated against this set before it is introduced into runtime processing.
+
+`architecture_pipeline` is for explicit descriptions of the system architecture
+or pipeline steps. It preserves the exact source wording and evidence like every
+other annotation; it does not let the semantic layer infer new architecture.
+`purpose` is reserved for explicit purpose or goal statements, rather than a
+requirement that describes an expected capability or constraint.
 
 ## Offline evaluation
 
@@ -72,9 +79,12 @@ doc2agent evaluate-semantic tests/fixtures/semantic-evaluation.md \
   --cases tests/fixtures/semantic-evaluation-cases.json
 ```
 
-This command intentionally uses the fixture provider. A future real provider
-must be passed to `SemanticEvaluationRunner` programmatically and meet the
-same report criteria before runtime integration.
+This command intentionally uses the fixture provider, so it is a deterministic
+contract smoke test—not a DeepSeek quality result. A real provider must be
+evaluated programmatically on a versioned multilingual golden corpus with
+recorded model, prompt, configuration, and corpus versions. The gate must fail
+on invalid evidence, wrong source/structural hashes, unsupported facts, or
+metrics below an explicit threshold.
 
 ## Providers
 
@@ -92,6 +102,13 @@ hash-addressed `KnowledgeCandidate`. It deep-copies the canonical document and
 marks proposed annotations as `AI_INFERRED`. The candidate is not published,
 does not change an approved snapshot, and cannot be consumed as Copilot
 context until a later approval step.
+
+The candidate also persists the patch's complete `reviewed_block_ids` coverage
+declaration. It is included in the candidate hash and shown in the human review
+proof, so approval can audit that every structural content block was reviewed.
+Candidates produced under this contract have required `schema_version: "2.0"`.
+Earlier candidate snapshots are intentionally not read as approved candidates;
+they must be regenerated and approved under the v2 contract.
 
 ```bash
 doc2agent create-candidate patch.json --document structured.document.json

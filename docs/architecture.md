@@ -42,7 +42,8 @@ report's `sanitized_document` field.
 
 `DocxPreflight` is a separate ingestion boundary. It does not extract package
 contents or fetch external relationships. It classifies a DOCX as `pass`,
-`requires_review`, or `block`; only `pass` is stored. The source catalog is a
+`requires_review`, or `block`; `pass` and an explicitly approved
+`requires_review` result may be stored. The source catalog is a
 small JSON index for now. It records source versions by content hash and a
 stable logical document ID; SQLite is deferred until concurrent jobs or more
 durable state management are required.
@@ -51,22 +52,24 @@ durable state management are required.
 prevents programmatic callers from reaching Converter with a rejected or
 unreviewed DOCX.
 
-Isolated semantic contract (not part of the runtime pipeline):
+Explicit semantic and publication workflow (not part of deterministic ingest):
 
 ```text
 document.json
     ↓
-SemanticAnalyzer (LLM/provider abstraction)
+sanitized_document + configured provider
     ↓
-knowledge.json
-    ├── Copilot/agent-ready export
-    ├── RAG/Search adapter
-    └── Graph adapter
+EnrichmentPatch → validation → candidate + EvidenceRef proof
+    ↓
+human approval
+    ↓
+approved knowledge.json → TopicRenderer → Copilot Markdown
 ```
 
-The current implementation supplies only deterministic no-op and fixture
-providers. A future LLM provider must use this boundary rather than altering
-conversion or structural analysis.
+The Web UI and CLI both invoke this workflow through domain services. A provider
+can propose facts only; it cannot alter conversion, canonical `document.json`,
+or the approved snapshot. It is an explicit configured action, not an automatic
+pipeline stage.
 
 ## Principles
 
@@ -76,3 +79,5 @@ conversion or structural analysis.
 - Hebrew/RTL is preserved; direction is metadata only.
 - No LLM is used before the semantic stage.
 - RAG and graph systems are replaceable consumers, not the source of truth.
+- The secure ingest/pipeline boundary is DOCX-only; DOC/RTF remain
+  direct-converter formats until they receive equivalent preflight handling.

@@ -7,8 +7,28 @@ from pydantic import BaseModel, ConfigDict, Field
 from doc2agent.models.document import AnalyzedDocument
 
 SemanticOrigin = Literal["VERIFIED", "AI_INFERRED"]
-SemanticKind = Literal["requirement", "decision", "action_item"]
+SemanticKind = Literal[
+    "purpose",
+    "requirement",
+    "decision",
+    "action_item",
+    "architecture_pipeline",
+]
 EvidenceSupport = Literal["explicit", "inferred", "ambiguous"]
+COPILOT_CONTEXT_KINDS = (
+    "purpose",
+    "requirement",
+    "decision",
+    "architecture_pipeline",
+    "action_item",
+)
+COPILOT_CONTEXT_LABELS = {
+    "purpose": "Purpose",
+    "requirement": "Requirements",
+    "decision": "Decisions",
+    "architecture_pipeline": "Architecture and pipeline",
+    "action_item": "Action items",
+}
 
 
 class EvidenceRef(BaseModel):
@@ -22,6 +42,16 @@ class EvidenceRef(BaseModel):
     support: EvidenceSupport
 
 
+class PipelineStep(BaseModel):
+    """Exact Component/Input/Output cells from one evidence-table row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    component: str = Field(min_length=1)
+    input: str = Field(min_length=1)
+    output: str = Field(min_length=1)
+
+
 class SemanticAnnotation(BaseModel):
     """Provider-produced knowledge with explicit evidence in document.json."""
 
@@ -30,10 +60,20 @@ class SemanticAnnotation(BaseModel):
     id: str = Field(min_length=1)
     kind: SemanticKind
     value: str = Field(min_length=1)
+    pipeline_step: PipelineStep | None = None
     # Legacy migration field. New annotations should use ``evidence``.
     source_ids: list[str] = Field(default_factory=list)
     evidence: list[EvidenceRef] = Field(default_factory=list)
     origin: SemanticOrigin
+
+
+def copilot_fact_value(annotation: SemanticAnnotation) -> str:
+    """Format a semantic fact without changing source-linked values."""
+
+    if annotation.pipeline_step is None:
+        return annotation.value
+    step = annotation.pipeline_step
+    return f"{step.component}: {step.input} → {step.output}"
 
 
 class KnowledgeDocument(BaseModel):

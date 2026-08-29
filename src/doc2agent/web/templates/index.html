@@ -21,6 +21,10 @@
       >
         <label for="file">Choose DOC/DOCX</label>
         <input id="file" name="file" type="file" accept=".doc,.docx" required>
+        <label for="approve-review">
+          <input id="approve-review" name="approve_review" type="checkbox" value="true">
+          I approve review of DOCX external links. Links will not be opened or fetched.
+        </label>
         <button type="submit">Process</button>
         <span id="process-loader" class="loader htmx-indicator" role="status">Processing…</span>
       </form>

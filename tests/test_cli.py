@@ -312,3 +312,183 @@ def test_evaluate_semantic_reports_fixture_pass(
     assert "Matched: 9/9" in result.output
     assert "Evaluation: OK" in result.output
     assert json.loads(output_path.read_text(encoding="utf-8"))["passed"] is True
+
+
+def test_evaluate_enrichment_uses_sanitized_document_and_prints_json(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.docx"
+    golden = tmp_path / "golden.json"
+    source.touch()
+    golden.write_text("{}", encoding="utf-8")
+    _stub_accepted_ingest(monkeypatch, source)
+
+    sanitized_document = object()
+    monkeypatch.setattr(
+        cli,
+        "AnalyzedDocument",
+        SimpleNamespace(model_validate=lambda value: sanitized_document),
+    )
+    monkeypatch.setattr(
+        cli,
+        "Doc2AgentPipeline",
+        lambda: SimpleNamespace(
+            run=lambda *_: SimpleNamespace(
+                can_send_to_llm=True,
+                security=SimpleNamespace(sanitized_document={"redacted": True}),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "deepseek_settings_from_environment",
+        lambda **_: SimpleNamespace(name="fixture", model="fixture-model"),
+    )
+
+    supplied_documents: list[object] = []
+
+    class ProviderStub:
+        def __init__(self, _: object) -> None:
+            pass
+
+        def create_patch(self, document: object) -> object:
+            supplied_documents.append(document)
+            return object()
+
+    class RunnerStub:
+        def evaluate_patch(self, *args: object) -> SimpleNamespace:
+            assert args[1] is sanitized_document
+            assert args[2] == golden
+            return SimpleNamespace(
+                passed=True,
+                model_dump_json=lambda: '{"passed":true,"subject":"patch"}',
+            )
+
+    monkeypatch.setattr(cli, "OpenAICompatibleEnrichmentProvider", ProviderStub)
+    monkeypatch.setattr(cli, "EnrichmentGoldenRunner", RunnerStub)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "evaluate-enrichment",
+            str(source),
+            "--golden",
+            str(golden),
+            "--storage",
+            str(tmp_path / "storage"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {"passed": True, "subject": "patch"}
+    assert supplied_documents == [sanitized_document]
+
+
+def test_evaluate_enrichment_exits_nonzero_for_failed_report(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.docx"
+    golden = tmp_path / "golden.json"
+    source.touch()
+    golden.write_text("{}", encoding="utf-8")
+    _stub_accepted_ingest(monkeypatch, source)
+
+    monkeypatch.setattr(
+        cli,
+        "AnalyzedDocument",
+        SimpleNamespace(model_validate=lambda _: object()),
+    )
+    monkeypatch.setattr(
+        cli,
+        "Doc2AgentPipeline",
+        lambda: SimpleNamespace(
+            run=lambda *_: SimpleNamespace(
+                can_send_to_llm=True,
+                security=SimpleNamespace(sanitized_document={}),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "deepseek_settings_from_environment",
+        lambda **_: SimpleNamespace(name="fixture", model="fixture-model"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "OpenAICompatibleEnrichmentProvider",
+        lambda _: SimpleNamespace(create_patch=lambda _: object()),
+    )
+    monkeypatch.setattr(
+        cli,
+        "EnrichmentGoldenRunner",
+        lambda: SimpleNamespace(
+            evaluate_patch=lambda *_: SimpleNamespace(
+                passed=False,
+                model_dump_json=lambda: '{"passed":false,"subject":"patch"}',
+            )
+        ),
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "evaluate-enrichment",
+            str(source),
+            "--golden",
+            str(golden),
+            "--storage",
+            str(tmp_path / "storage"),
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    assert json.loads(result.output)["passed"] is False
+
+
+def test_evaluate_enrichment_rejects_pipeline_state_before_provider_use(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.docx"
+    golden = tmp_path / "golden.json"
+    source.touch()
+    golden.write_text("{}", encoding="utf-8")
+    _stub_accepted_ingest(monkeypatch, source)
+    monkeypatch.setattr(
+        cli,
+        "Doc2AgentPipeline",
+        lambda: SimpleNamespace(
+            run=lambda *_: SimpleNamespace(
+                can_send_to_llm=False,
+                status=PipelineStatus.BLOCKED,
+                security=SimpleNamespace(sanitized_document={}),
+            )
+        ),
+    )
+
+    provider_called = False
+
+    def provider_stub(_: object) -> object:
+        nonlocal provider_called
+        provider_called = True
+        return object()
+
+    monkeypatch.setattr(cli, "OpenAICompatibleEnrichmentProvider", provider_stub)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "evaluate-enrichment",
+            str(source),
+            "--golden",
+            str(golden),
+            "--storage",
+            str(tmp_path / "storage"),
+        ],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "cannot be sent to a model" in result.output
+    assert provider_called is False

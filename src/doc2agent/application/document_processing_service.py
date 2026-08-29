@@ -47,8 +47,13 @@ class DocumentProcessingService:
         source: Path,
         *,
         document_id: str | None = None,
+        approve_review: bool = False,
     ) -> ProcessingResult:
-        ingested = self.ingest_service.ingest(source, document_id=document_id)
+        ingested = self.ingest_service.ingest(
+            source,
+            document_id=document_id,
+            approve_review=approve_review,
+        )
         if not ingested.accepted or ingested.source_path is None:
             diagnostics = (
                 "; ".join(diagnostic.message for diagnostic in ingested.diagnostics)
@@ -110,11 +115,20 @@ class DocumentProcessingService:
             raise DocumentProcessingError(
                 "Security", "Security review blocked this document from model use."
             )
+        sanitized_document = AnalyzedDocument.model_validate(security.sanitized_document)
+        if (
+            document.source_manifest != sanitized_document.source_manifest
+            or document.structural_sha256 != sanitized_document.structural_sha256
+        ):
+            raise DocumentProcessingError(
+                "Security", "Security artifact belongs to a different document revision."
+            )
+
         settings = deepseek_settings_from_environment()
         patch = OpenAICompatibleEnrichmentProvider(settings).create_patch(
-            AnalyzedDocument.model_validate(security.sanitized_document)
+            sanitized_document
         )
-        candidate = CandidateBuilder().build(patch, document)
+        candidate = CandidateBuilder().build(patch, sanitized_document)
         candidate_path = (
             document_path.parent.parent
             / "candidate"
@@ -124,6 +138,7 @@ class DocumentProcessingService:
         review = CandidateReviewer().review(candidate)
         return CandidateProof(
             candidate_sha256=review.candidate_sha256,
+            reviewed_block_ids=list(review.reviewed_block_ids),
             facts=[
                 ProofFact(
                     kind=f.annotation.kind,

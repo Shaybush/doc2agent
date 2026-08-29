@@ -12,9 +12,12 @@ from doc2agent.artifacts import canonical_json_sha256
 from doc2agent.semantic import (
     ApprovalService,
     CandidateBuilder,
+    CandidateReviewer,
     EnrichmentPatch,
+    EnrichmentPatchValidator,
     EvidenceRef,
     PatchFact,
+    PipelineStep,
 )
 from doc2agent.source_manifest import SourceManifest
 
@@ -33,9 +36,11 @@ def _candidate(*, value: str = "General English paragraph."):
     document = _document()
     block_id = document.sections[0].blocks[0].id
     patch = EnrichmentPatch(
+        schema_version="2.0",
         source_id=document.source_manifest.source_id,
         structural_sha256=document.structural_sha256,
         scope_block_ids=[block_id],
+        reviewed_block_ids=sorted(EnrichmentPatchValidator._block_ids(document)),
         facts=[
             PatchFact(
                 id="fact:requirement",
@@ -55,6 +60,16 @@ def _candidate(*, value: str = "General English paragraph."):
     return CandidateBuilder().build(patch, document)
 
 
+def _self_hash(candidate):
+    return candidate.model_copy(
+        update={
+            "candidate_sha256": canonical_json_sha256(
+                candidate.model_dump(mode="json", exclude={"candidate_sha256"})
+            )
+        }
+    )
+
+
 def test_approve_archives_and_publishes_candidate_atomically(tmp_path: Path) -> None:
     candidate = _candidate()
     service = ApprovalService(tmp_path / "storage")
@@ -69,6 +84,8 @@ def test_approve_archives_and_publishes_candidate_atomically(tmp_path: Path) -> 
     assert archived.exists()
     current = json.loads(current_path.read_text(encoding="utf-8"))
     assert current["candidate_sha256"] == candidate.candidate_sha256
+    assert current["schema_version"] == "2.0"
+    assert current["reviewed_block_ids"] == candidate.reviewed_block_ids
     entries = [
         json.loads(line)
         for line in (tmp_path / "storage/approval-log.jsonl").read_text(
@@ -90,6 +107,54 @@ def test_approval_rejects_tampered_candidate_without_changing_current(tmp_path: 
         service.approve(tampered, document_id=DOCUMENT_ID, approved_by="reviewer")
 
     assert service.current_path(DOCUMENT_ID).read_text(encoding="utf-8") == before
+
+
+def test_candidate_review_and_approval_reject_self_hashed_invalid_review_coverage(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate()
+    invalid = _self_hash(candidate.model_copy(update={"reviewed_block_ids": []}))
+
+    with pytest.raises(ValueError, match="Candidate violates enrichment contract"):
+        CandidateReviewer().review(invalid)
+    with pytest.raises(ValueError, match="Candidate violates enrichment contract"):
+        ApprovalService(tmp_path / "storage").approve(
+            invalid,
+            document_id=DOCUMENT_ID,
+            approved_by="reviewer",
+        )
+
+
+def test_candidate_review_and_approval_reject_self_hashed_invented_pipeline_step(
+    tmp_path: Path,
+) -> None:
+    candidate = _candidate()
+    invalid = candidate.model_copy(
+        update={
+            "annotations": [
+                candidate.annotations[0].model_copy(
+                    update={
+                        "kind": "architecture_pipeline",
+                        "pipeline_step": PipelineStep(
+                            component="Invented",
+                            input="DOCX",
+                            output="Markdown",
+                        )
+                    }
+                )
+            ]
+        }
+    )
+    invalid = _self_hash(invalid)
+
+    with pytest.raises(ValueError, match="PIPELINE_STEP_NOT_IN_EVIDENCE_ROW"):
+        CandidateReviewer().review(invalid)
+    with pytest.raises(ValueError, match="PIPELINE_STEP_NOT_IN_EVIDENCE_ROW"):
+        ApprovalService(tmp_path / "storage").approve(
+            invalid,
+            document_id=DOCUMENT_ID,
+            approved_by="reviewer",
+        )
 
 
 def test_approval_rejects_inferred_evidence(tmp_path: Path) -> None:

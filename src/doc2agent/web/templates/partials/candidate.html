@@ -1,6 +1,7 @@
 <section id="workflow" class="result">
   <h2>Candidate review / proof</h2>
   <p>Candidate hash: <code>{{ proof.candidate_sha256 }}</code></p>
+  <p>Reviewed content blocks: <code>{{ proof.reviewed_block_ids | join(', ') }}</code></p>
   {% if proof.facts %}
     {% for fact in proof.facts %}
       <article>

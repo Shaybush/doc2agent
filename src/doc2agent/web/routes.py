@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from threading import Lock
 from uuid import uuid4
 
-from fastapi import APIRouter, Request, UploadFile
+from fastapi import APIRouter, Form, Request, UploadFile
 from fastapi.responses import PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 ALLOWED_UPLOAD_EXTENSIONS = {".doc", ".docx"}
 SESSION_COOKIE = "doc2agent_web_session"
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+templates.env.policies["json.dumps_kwargs"] = {"ensure_ascii": False}
 
 
 class ProcessedArtifactStore:
@@ -68,7 +70,11 @@ def create_router() -> APIRouter:
         return templates.TemplateResponse(request=request, name="index.html")
 
     @router.post("/documents/process")
-    async def process_document(request: Request, file: UploadFile):
+    async def process_document(
+        request: Request,
+        file: UploadFile,
+        approve_review: bool = Form(False),
+    ):
         filename = _safe_upload_name(file.filename)
         if filename is None:
             return _error_response(
@@ -87,6 +93,7 @@ def create_router() -> APIRouter:
                 result = service.process(
                     upload_path,
                     document_id=artifacts.document_id_for(session_id, filename),
+                    approve_review=approve_review,
                 )
         except DocumentProcessingError as exc:
             return _error_response(request, exc.stage, exc.reason)
@@ -196,7 +203,7 @@ def create_router() -> APIRouter:
         if result is None:
             return PlainTextResponse("JSON artifact not found.", status_code=404)
         return PlainTextResponse(
-            result.model_dump_json(indent=2),
+            json.dumps(result.document_json, ensure_ascii=False, indent=2),
             media_type="application/json",
             headers={
                 "Content-Disposition": (
