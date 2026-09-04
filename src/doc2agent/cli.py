@@ -6,6 +6,7 @@ import typer
 
 from doc2agent.analyzer import StructuralAnalyzer
 from doc2agent.converter import Converter
+from doc2agent.design import FigmaSnapshot, FigmaSnapshotStore
 from doc2agent.ingest import IngestService
 from doc2agent.models.document import AnalyzedDocument
 from doc2agent.pipeline import Doc2AgentPipeline
@@ -281,6 +282,25 @@ def review_candidate(
     )
     review = CandidateReviewer().review(candidate_model)
     typer.echo(CandidateReviewer.render(review))
+
+
+@app.command("import-figma-snapshot")
+def import_figma_snapshot(
+    snapshot: Path = typer.Argument(..., exists=True, dir_okay=False),
+    source_id: str = typer.Option(..., "--source-id"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+) -> None:
+    """Validate and store one read-only Figma snapshot for a source revision."""
+
+    if IngestService(storage).document_id_for_source(source_id) is None:
+        raise typer.BadParameter("Figma snapshot source is not registered")
+    try:
+        snapshot_model = FigmaSnapshot.model_validate_json(snapshot.read_text(encoding="utf-8"))
+        output_path = FigmaSnapshotStore(storage).write(source_id, snapshot_model)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Figma snapshot: {output_path}")
+    typer.echo(f"Snapshot hash: {snapshot_model.snapshot_sha256}")
 
 
 @app.command("render-copilot")

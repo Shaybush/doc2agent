@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from typer.testing import CliRunner
 
+from doc2agent import cli
 from doc2agent.analyzer import StructuralAnalyzer
 from doc2agent.design import (
     DesignAlignmentApprovalService,
@@ -15,6 +17,7 @@ from doc2agent.design import (
     FigmaSnapshot,
     FigmaSnapshotStore,
 )
+from doc2agent.ingest import IngestService
 from doc2agent.semantic import (
     ApprovalService,
     CandidateBuilder,
@@ -118,6 +121,35 @@ def test_snapshot_store_is_source_revision_scoped_and_idempotent(tmp_path: Path)
     assert store.load(source_id, snapshot.snapshot_sha256) == snapshot
     with pytest.raises(ValueError, match="Source ID"):
         store.write("source:unknown", snapshot)
+
+
+def test_cli_imports_snapshot_only_for_a_registered_source(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    source = Path(__file__).parent / "fixtures" / "hebrew_test_document.docx"
+    ingested = IngestService(storage).ingest(source, approve_review=True)
+    assert ingested.accepted
+    snapshot = _snapshot()
+    snapshot_path = tmp_path / "snapshot.figma.json"
+    snapshot_path.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "import-figma-snapshot",
+            str(snapshot_path),
+            "--source-id",
+            ingested.manifest.source_id,
+            "--storage",
+            str(storage),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Snapshot hash:" in result.output
+    assert FigmaSnapshotStore(storage).load(
+        ingested.manifest.source_id,
+        snapshot.snapshot_sha256,
+    ) == snapshot
 
 
 def test_alignment_requires_annotation_evidence_and_selected_figma_node(tmp_path: Path) -> None:
