@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -150,6 +151,71 @@ def test_cli_imports_snapshot_only_for_a_registered_source(tmp_path: Path) -> No
         ingested.manifest.source_id,
         snapshot.snapshot_sha256,
     ) == snapshot
+
+
+def test_cli_creates_design_alignment_from_explicit_bindings(tmp_path: Path) -> None:
+    candidate, block_id = _candidate(tmp_path)
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    (storage / "source-catalog.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "sources": {
+                    candidate.source_id: {
+                        "source_id": candidate.source_id,
+                        "document_id": "document:registration",
+                        "filename": "registration.md",
+                        "source_path": "storage/sources/registration.md",
+                        "received_at": "2026-09-04T00:00:00+00:00",
+                    }
+                },
+                "documents": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    snapshot = _snapshot()
+    FigmaSnapshotStore(storage).write(candidate.source_id, snapshot)
+    candidate_path = tmp_path / "candidate.knowledge.json"
+    candidate_path.write_text(candidate.model_dump_json(indent=2), encoding="utf-8")
+    bindings_path = tmp_path / "bindings.json"
+    bindings_path.write_text(
+        json.dumps(
+            [
+                {
+                    "annotation_id": "fact:invalid-email",
+                    "evidence_block_id": block_id,
+                    "figma_node_id": "12:56",
+                    "status": "matches",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "create-design-alignment",
+            str(bindings_path),
+            "--candidate",
+            str(candidate_path),
+            "--snapshot-sha256",
+            snapshot.snapshot_sha256,
+            "--storage",
+            str(storage),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Alignment hash:" in result.output
+    alignment_paths = list(
+        (storage / "artifacts" / candidate.source_id.replace(":", "-") / "design-alignment").glob(
+            "*.design-alignment.json"
+        )
+    )
+    assert len(alignment_paths) == 1
 
 
 def test_alignment_requires_annotation_evidence_and_selected_figma_node(tmp_path: Path) -> None:

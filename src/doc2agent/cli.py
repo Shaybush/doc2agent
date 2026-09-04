@@ -3,10 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from pydantic import TypeAdapter
 
 from doc2agent.analyzer import StructuralAnalyzer
 from doc2agent.converter import Converter
-from doc2agent.design import FigmaSnapshot, FigmaSnapshotStore
+from doc2agent.design import (
+    DesignAlignmentBuilder,
+    DesignBinding,
+    FigmaSnapshot,
+    FigmaSnapshotStore,
+)
 from doc2agent.ingest import IngestService
 from doc2agent.models.document import AnalyzedDocument
 from doc2agent.pipeline import Doc2AgentPipeline
@@ -301,6 +307,52 @@ def import_figma_snapshot(
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"Figma snapshot: {output_path}")
     typer.echo(f"Snapshot hash: {snapshot_model.snapshot_sha256}")
+
+
+@app.command("create-design-alignment")
+def create_design_alignment(
+    bindings: Path = typer.Argument(..., exists=True, dir_okay=False),
+    candidate: Path = typer.Option(..., "--candidate", exists=True, dir_okay=False),
+    snapshot_sha256: str = typer.Option(..., "--snapshot-sha256"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+) -> None:
+    """Create a reviewable requirement-to-Figma mapping from explicit decisions."""
+
+    try:
+        candidate_model = KnowledgeCandidate.model_validate_json(
+            candidate.read_text(encoding="utf-8")
+        )
+        if IngestService(storage).document_id_for_source(candidate_model.source_id) is None:
+            raise ValueError("Design alignment source is not registered")
+        snapshot = FigmaSnapshotStore(storage).load(
+            candidate_model.source_id,
+            snapshot_sha256,
+        )
+        bindings_model = TypeAdapter(list[DesignBinding]).validate_json(
+            bindings.read_text(encoding="utf-8")
+        )
+        alignment = DesignAlignmentBuilder().build(
+            candidate_model,
+            snapshot,
+            bindings_model,
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    output_path = (
+        storage
+        / "artifacts"
+        / candidate_model.source_id.replace(":", "-")
+        / "design-alignment"
+        / f"{alignment.alignment_sha256}.design-alignment.json"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        alignment.model_dump_json(indent=2, exclude_none=True),
+        encoding="utf-8",
+    )
+    typer.echo(f"Design alignment: {output_path}")
+    typer.echo(f"Alignment hash: {alignment.alignment_sha256}")
 
 
 @app.command("render-copilot")
