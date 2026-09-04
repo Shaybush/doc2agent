@@ -92,6 +92,22 @@ class FigmaImportRequestStore:
             for path in sorted(directory.glob("*.figma-import-request.json"))
         ]
 
+    def list_pending(self, source_id: str | None = None) -> list[FigmaImportRequest]:
+        """Return only work explicitly handed off to a capture adapter."""
+
+        if source_id is not None:
+            requests = self.list(source_id)
+        else:
+            requests = [
+                FigmaImportRequest.model_validate_json(path.read_text(encoding="utf-8"))
+                for path in sorted(
+                    (self.storage_root / "figma-import-requests").glob(
+                        "*/*.figma-import-request.json"
+                    )
+                )
+            ]
+        return [request for request in requests if request.status == "pending"]
+
     def assert_can_fulfill(
         self,
         source_id: str,

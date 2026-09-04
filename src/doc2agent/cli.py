@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import typer
@@ -364,6 +365,26 @@ def capture_figma_import_request(
     typer.echo(f"Figma snapshot: {output_path}")
     typer.echo(f"Snapshot hash: {snapshot.snapshot_sha256}")
     typer.echo(f"Figma import request: {completed.request_sha256} ({completed.status})")
+
+
+@app.command("list-pending-figma-import-requests")
+def list_pending_figma_import_requests(
+    source_id: str | None = typer.Option(None, "--source-id"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+) -> None:
+    """Emit pending Figma capture work for a separately configured MCP worker."""
+
+    try:
+        pending = FigmaImportRequestStore(storage).list_pending(source_id)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(
+        json.dumps(
+            [request.model_dump(mode="json") for request in pending],
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
 
 
 @app.command("create-design-alignment")

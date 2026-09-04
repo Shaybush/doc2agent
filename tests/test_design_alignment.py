@@ -218,6 +218,28 @@ def test_capture_command_completes_request_with_multiple_figma_nodes(tmp_path: P
     assert [node.node_id for node in snapshot.nodes] == ["12:56", "12:80"]
 
 
+def test_pending_figma_capture_queue_excludes_completed_requests(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    first_source_id = "sha256:" + "a" * 64
+    second_source_id = "sha256:" + "b" * 64
+    store = FigmaImportRequestStore(storage)
+    pending = store.create(
+        first_source_id, "https://www.figma.com/design/pending-file/Pending"
+    )
+    captured = store.create(
+        second_source_id, "https://www.figma.com/design/registration-file/Registration"
+    )
+    store.fulfill(second_source_id, captured.request_sha256, _snapshot())
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["list-pending-figma-import-requests", "--storage", str(storage)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == [pending.model_dump(mode="json")]
+
+
 def test_cli_completes_registered_figma_import_request(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     source = Path(__file__).parent / "fixtures" / "hebrew_test_document.docx"
