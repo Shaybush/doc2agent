@@ -80,6 +80,16 @@ class StubProcessingService:
         assert proof.candidate_sha256 == "b" * 64
         return "# Approved knowledge\n\n- Explicit requirement\n"
 
+    def approve_and_publish_with_figma(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        approved_by: str,
+    ) -> str:
+        assert approved_by == "reviewer"
+        assert proof.candidate_sha256 == "b" * 64
+        return "# Approved knowledge with Figma\n\n- Explicit requirement\n"
+
     def approve_knowledge(
         self, result: ProcessingResult, proof: CandidateProof, approved_by: str
     ) -> KnowledgeApprovalPreview:
@@ -439,7 +449,7 @@ def test_candidate_review_creates_a_figma_mapping_draft() -> None:
     )
 
     assert response.status_code == 200
-    assert "Figma mapping drafts" in response.text
+    assert "Current Figma mappings" in response.text
     assert "fact:explicit-requirement" in response.text
 
 
@@ -480,7 +490,7 @@ def test_mapping_draft_uses_one_requirement_evidence_pair() -> None:
     assert response.status_code == 200
 
 
-def test_candidate_review_can_reuse_a_valid_older_mapping_draft() -> None:
+def test_candidate_review_hides_advanced_reuse_flow() -> None:
     class ReuseProcessingService(StubProcessingService):
         def __init__(self, result: ProcessingResult | Exception) -> None:
             super().__init__(result)
@@ -527,18 +537,11 @@ def test_candidate_review_can_reuse_a_valid_older_mapping_draft() -> None:
     artifact_id = next(iter(client.app.state.processed_artifacts._items))
 
     review = client.post(f"/documents/{artifact_id}/candidate")
-    assert "Reusable Figma mapping drafts" in review.text
-    assert "Reuse for current candidate" in review.text
-
-    reused = client.post(
-        f"/documents/{artifact_id}/reuse-design-alignment",
-        data={"alignment_sha256": "e" * 64},
-    )
-    assert reused.status_code == 200
-    assert service.reused == ["e" * 64]
+    assert "Reusable Figma mapping drafts" not in review.text
+    assert "Reuse for current candidate" not in review.text
 
 
-def test_figma_approval_requires_knowledge_then_mapping_before_publish() -> None:
+def test_figma_review_approves_and_saves_markdown_in_one_action() -> None:
     class FigmaApprovalProcessingService(StubProcessingService):
         def __init__(self, result: ProcessingResult | Exception) -> None:
             super().__init__(result)
@@ -580,24 +583,14 @@ def test_figma_approval_requires_knowledge_then_mapping_before_publish() -> None
     artifact_id = next(iter(client.app.state.processed_artifacts._items))
 
     review = client.post(f"/documents/{artifact_id}/candidate")
-    assert "Approve knowledge" in review.text
-    assert "Approve and publish Copilot Markdown" not in review.text
-    assert 'disabled>Save Copilot Markdown</button>' in review.text
+    assert "Current Figma mappings" in review.text
+    assert "Approve and save Copilot Markdown" in review.text
+    assert "Approval sequence" not in review.text
 
-    knowledge = client.post(
-        f"/documents/{artifact_id}/approve-knowledge", data={"approved_by": "reviewer"}
+    published = client.post(
+        f"/documents/{artifact_id}/approve-and-publish-figma",
+        data={"approved_by": "reviewer"},
     )
-    assert knowledge.status_code == 200
-    assert "Approve a mapping or review package" in knowledge.text
-
-    mapping = client.post(
-        f"/documents/{artifact_id}/approve-design-alignment",
-        data={"alignment_sha256": "e" * 64, "approved_by": "reviewer"},
-    )
-    assert mapping.status_code == 200
-    assert "Save Copilot Markdown with approved Figma mapping" in mapping.text
-
-    published = client.post(f"/documents/{artifact_id}/publish-copilot-with-design")
     assert published.status_code == 200
     assert "Published Copilot Markdown" in published.text
     assert "Approved knowledge with Figma" in published.text
@@ -675,8 +668,8 @@ def test_candidate_review_can_create_a_same_snapshot_review_package() -> None:
     )
 
     assert response.status_code == 200
-    assert "Review package — 2 mappings" in response.text
-    assert "g" * 64 in response.text
+    assert "Current Figma mappings" in response.text
+    assert "2:15" in response.text
 
 
 def test_unsupported_extension_returns_readable_error() -> None:

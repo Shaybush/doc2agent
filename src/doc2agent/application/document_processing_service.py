@@ -304,6 +304,63 @@ class DocumentProcessingService:
         except (OSError, ValueError) as exc:
             raise DocumentProcessingError("Approval", str(exc)) from exc
 
+    def approve_and_publish_with_figma(
+        self, result: ProcessingResult, proof: CandidateProof, approved_by: str
+    ) -> str:
+        """Approve one candidate and its current single-node mappings in one MVP action."""
+
+        try:
+            candidate = self._candidate_for_proof(result, proof)
+            drafts = [
+                alignment
+                for alignment in DesignAlignmentStore(self.storage_root).list(result.source_id)
+                if (
+                    alignment.candidate_sha256 == candidate.candidate_sha256
+                    and len(alignment.bindings) == 1
+                )
+            ]
+            if not drafts:
+                raise ValueError("Create at least one Figma mapping before saving Markdown")
+            snapshot_hashes = {draft.figma_snapshot_sha256 for draft in drafts}
+            if len(snapshot_hashes) != 1:
+                raise ValueError(
+                    "Save one Figma snapshot at a time; create mappings from one snapshot."
+                )
+            snapshot = FigmaSnapshotStore(self.storage_root).load(
+                result.source_id, next(iter(snapshot_hashes))
+            )
+            alignment = DesignAlignmentBuilder().build(
+                candidate,
+                snapshot,
+                [
+                    binding
+                    for draft in sorted(drafts, key=lambda draft: draft.alignment_sha256)
+                    for binding in draft.bindings
+                ],
+            )
+            DesignAlignmentStore(self.storage_root).write(alignment)
+            approval = ApprovalService(self.storage_root)
+            knowledge_path = approval.approve(
+                candidate, document_id=result.document_id, approved_by=approved_by
+            )
+            design_approval = DesignAlignmentApprovalService(self.storage_root)
+            design_approval.approve(
+                alignment,
+                candidate,
+                snapshot,
+                document_id=result.document_id,
+                approved_by=approved_by,
+                knowledge_path=knowledge_path,
+            )
+            output = copilot_context_output_path(candidate, self.storage_root, result.document_id)
+            return TopicRenderer().render(
+                candidate,
+                output,
+                design_alignment=design_approval.load_current(result.document_id),
+            ).context_path.read_text(encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Approval", str(exc)) from exc
+
     def list_figma_snapshots(
         self, result: ProcessingResult
     ) -> list[FigmaSnapshotPreview]:

@@ -84,18 +84,11 @@
   </section>
   {% if design_alignment_drafts %}
     <section class="figma-review">
-      <h2>Figma mapping drafts</h2>
-      <p class="hint">A review package combines two or more mappings from the same immutable Figma snapshot. Drafts are not approved or published.</p>
-      <form class="mapping-package-form" hx-post="/documents/{{ artifact_id }}/design-alignment-package" hx-target="#workflow" hx-swap="innerHTML">
+      <h2>Current Figma mappings</h2>
+      <p class="hint">Review these explicit requirement-to-frame decisions. They will be approved together when you save Copilot Markdown.</p>
       <ul>
         {% for draft in design_alignment_drafts %}
           <li>
-            {% if draft.bindings | length == 1 %}
-              <label><input type="checkbox" name="alignment_sha256" value="{{ draft.alignment_sha256 }}"> Include in a review package</label>
-            {% else %}
-              <strong>Review package — {{ draft.bindings | length }} mappings</strong>
-            {% endif %}
-            <code>{{ draft.alignment_sha256 }}</code>
             <ul>
               {% for binding in draft.bindings %}
                 <li><code>{{ binding.annotation_id }}</code> → <code>{{ binding.figma_node_id }}</code> ({{ binding.status }})</li>
@@ -104,61 +97,21 @@
           </li>
         {% endfor %}
       </ul>
-      <button type="submit">Create review package from selected mappings</button>
-      </form>
-      {% if knowledge_approval %}
-        <h3>Approve a mapping or review package</h3>
-        {% for draft in design_alignment_drafts %}
-          <form hx-post="/documents/{{ artifact_id }}/approve-design-alignment" hx-target="#workflow" hx-swap="innerHTML">
-            <input type="hidden" name="alignment_sha256" value="{{ draft.alignment_sha256 }}">
-            <span>{% if draft.bindings | length > 1 %}Review package{% else %}Mapping{% endif %}: <code>{{ draft.alignment_sha256 }}</code></span>
-            <label>Design approver <input name="approved_by" required></label>
-            <button type="submit">Approve</button>
-          </form>
-        {% endfor %}
-      {% endif %}
-    </section>
-  {% endif %}
-  {% if reusable_design_alignment_drafts %}
-    <section class="figma-review">
-      <h2>Reusable Figma mapping drafts</h2>
-      <p class="hint">These drafts came from an earlier candidate but their requirement/evidence bindings still validate for the current candidate. Reusing a draft does not approve it.</p>
-      <ul>
-        {% for draft in reusable_design_alignment_drafts %}
-          <li>
-            <code>{{ draft.alignment_sha256 }}</code> from candidate <code>{{ draft.source_candidate_sha256 }}</code>
-            <form hx-post="/documents/{{ artifact_id }}/reuse-design-alignment" hx-target="#workflow" hx-swap="innerHTML">
-              <input type="hidden" name="alignment_sha256" value="{{ draft.alignment_sha256 }}">
-              <button type="submit">Reuse for current candidate</button>
-            </form>
-          </li>
-        {% endfor %}
-      </ul>
     </section>
   {% endif %}
   {% if figma_snapshots or figma_import_requests or design_alignment_drafts %}
     <section class="figma-review">
-      <h2>Approval sequence</h2>
-      {% if knowledge_approval %}
-        <p>Knowledge approved for <code>{{ knowledge_approval.candidate_sha256 }}</code>.</p>
-      {% else %}
-        <form hx-post="/documents/{{ artifact_id }}/approve-knowledge" hx-target="#workflow" hx-swap="innerHTML">
-          <label for="knowledge_approved_by">Knowledge approver</label>
-          <input id="knowledge_approved_by" name="approved_by" required>
-          <button type="submit">Approve knowledge</button>
+      <h2>Save Copilot Markdown</h2>
+      {% if design_alignment_drafts %}
+        <p class="hint">This one action approves the current knowledge and the mappings above, then saves Copilot Markdown.</p>
+        <form hx-post="/documents/{{ artifact_id }}/approve-and-publish-figma" hx-target="#processing-result" hx-swap="innerHTML" hx-indicator="#approval-loader">
+          <label for="figma_approved_by">Approver</label>
+          <input id="figma_approved_by" name="approved_by" required>
+          <button type="submit">Approve and save Copilot Markdown</button>
+          <span id="approval-loader" class="loader htmx-indicator" role="status">Saving Copilot Markdown…</span>
         </form>
-      {% endif %}
-      {% if design_alignment_approval %}
-        <p>Figma mapping approved: <code>{{ design_alignment_approval.alignment_sha256 }}</code>.</p>
-        <form hx-post="/documents/{{ artifact_id }}/publish-copilot-with-design" hx-target="#processing-result" hx-swap="innerHTML" hx-indicator="#approval-loader">
-          <button type="submit">Save Copilot Markdown with approved Figma mapping</button>
-          <span id="approval-loader" class="loader htmx-indicator" role="status">Publishing Copilot Markdown…</span>
-        </form>
-      {% elif knowledge_approval %}
-        <p class="hint">Approve one mapping draft above before publishing Copilot Markdown with Figma context.</p>
-        <button type="button" disabled>Save Copilot Markdown</button>
       {% else %}
-        <p class="hint">Approve knowledge first. The Markdown save action stays locked until the Figma mapping is also approved.</p>
+        <p class="hint">Create at least one mapping from this Figma snapshot before saving Copilot Markdown.</p>
         <button type="button" disabled>Save Copilot Markdown</button>
       {% endif %}
     </section>

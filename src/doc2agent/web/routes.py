@@ -207,6 +207,30 @@ def create_router() -> APIRouter:
             context={"artifact_id": artifact_id, "result": updated_result},
         )
 
+    @router.post("/documents/{artifact_id}/approve-and-publish-figma")
+    async def approve_and_publish_figma(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Approval", "Generate and review a candidate first.")
+        try:
+            final_markdown = request.app.state.processing_service.approve_and_publish_with_figma(
+                result, proof, str(form.get("approved_by", ""))
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        updated_result = result.model_copy(
+            update={"published_copilot_markdown": final_markdown}
+        )
+        artifacts.replace(artifact_id, updated_result)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/result.html",
+            context={"artifact_id": artifact_id, "result": updated_result},
+        )
+
     @router.post("/documents/{artifact_id}/design-alignment-package")
     async def create_design_alignment_package(artifact_id: str, request: Request):
         form = await request.form()
@@ -405,11 +429,6 @@ def _candidate_response(
         figma_snapshots = service.list_figma_snapshots(result)
         figma_import_requests = service.list_figma_import_requests(result)
         design_alignment_drafts = service.list_design_alignment_drafts(result, proof)
-        reusable_design_alignment_drafts = service.list_reusable_design_alignment_drafts(
-            result, proof
-        )
-        knowledge_approval = service.current_knowledge_approval(result, proof)
-        design_alignment_approval = service.current_design_alignment_approval(result, proof)
     except DocumentProcessingError as exc:
         return _error_response(request, exc.stage, exc.reason)
     return templates.TemplateResponse(
@@ -421,9 +440,6 @@ def _candidate_response(
             "figma_snapshots": figma_snapshots,
             "figma_import_requests": figma_import_requests,
             "design_alignment_drafts": design_alignment_drafts,
-            "reusable_design_alignment_drafts": reusable_design_alignment_drafts,
-            "knowledge_approval": knowledge_approval,
-            "design_alignment_approval": design_alignment_approval,
         },
     )
 
