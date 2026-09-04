@@ -37,6 +37,17 @@ class DesignAlignmentStore:
             for path in sorted(self._directory(source_id).glob("*.design-alignment.json"))
         ]
 
+    def load(self, source_id: str, alignment_sha256: str) -> DesignAlignmentCandidate:
+        path = self.path_for(source_id, alignment_sha256)
+        if not path.is_file():
+            raise ValueError(f"Design alignment was not found: {alignment_sha256}")
+        alignment = DesignAlignmentCandidate.model_validate_json(
+            path.read_text(encoding="utf-8")
+        )
+        if alignment.alignment_sha256 != alignment_sha256:
+            raise ValueError("Design alignment filename does not match its hash")
+        return alignment
+
     def _directory(self, source_id: str) -> Path:
         if not source_id.startswith("sha256:"):
             raise ValueError("Source ID must be a SHA-256 source identifier")

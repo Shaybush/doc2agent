@@ -72,3 +72,12 @@ class DesignAlignmentDraftPreview(BaseModel):
     evidence_block_id: str
     figma_node_id: str
     status: str
+
+
+class KnowledgeApprovalPreview(BaseModel):
+    candidate_sha256: str
+
+
+class DesignAlignmentApprovalPreview(BaseModel):
+    alignment_sha256: str
+    figma_snapshot_sha256: str

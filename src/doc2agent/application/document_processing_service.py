@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from doc2agent.design import (
+    DesignAlignmentApprovalService,
     DesignAlignmentBuilder,
     DesignAlignmentStore,
     DesignBinding,
@@ -26,10 +27,12 @@ from doc2agent.validator import ValidationReport
 
 from .models import (
     CandidateProof,
+    DesignAlignmentApprovalPreview,
     DesignAlignmentDraftPreview,
     FigmaImportRequestPreview,
     FigmaNodePreview,
     FigmaSnapshotPreview,
+    KnowledgeApprovalPreview,
     ProcessingResult,
     ProofEvidence,
     ProofFact,
@@ -202,6 +205,100 @@ class DocumentProcessingService:
         except (OSError, ValueError) as exc:
             raise DocumentProcessingError("Approval", str(exc)) from exc
 
+    def approve_knowledge(
+        self, result: ProcessingResult, proof: CandidateProof, approved_by: str
+    ) -> KnowledgeApprovalPreview:
+        try:
+            candidate = self._candidate_for_proof(result, proof)
+            ApprovalService(self.storage_root).approve(
+                candidate, document_id=result.document_id, approved_by=approved_by
+            )
+            return KnowledgeApprovalPreview(candidate_sha256=candidate.candidate_sha256)
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Approval", str(exc)) from exc
+
+    def current_knowledge_approval(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> KnowledgeApprovalPreview | None:
+        try:
+            candidate = self._candidate_for_proof(result, proof)
+            self._require_current_knowledge(result, candidate)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Approval", str(exc)) from exc
+        return KnowledgeApprovalPreview(candidate_sha256=candidate.candidate_sha256)
+
+    def approve_design_alignment(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        alignment_sha256: str,
+        approved_by: str,
+    ) -> DesignAlignmentApprovalPreview:
+        try:
+            candidate = self._candidate_for_proof(result, proof)
+            knowledge_path = self._require_current_knowledge(result, candidate)
+            alignment = DesignAlignmentStore(self.storage_root).load(
+                result.source_id, alignment_sha256
+            )
+            snapshot = FigmaSnapshotStore(self.storage_root).load(
+                result.source_id, alignment.figma_snapshot_sha256
+            )
+            DesignAlignmentApprovalService(self.storage_root).approve(
+                alignment,
+                candidate,
+                snapshot,
+                document_id=result.document_id,
+                approved_by=approved_by,
+                knowledge_path=knowledge_path,
+            )
+            return DesignAlignmentApprovalPreview(
+                alignment_sha256=alignment.alignment_sha256,
+                figma_snapshot_sha256=alignment.figma_snapshot_sha256,
+            )
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Approval", str(exc)) from exc
+
+    def current_design_alignment_approval(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> DesignAlignmentApprovalPreview | None:
+        try:
+            candidate = self._candidate_for_proof(result, proof)
+            approved = DesignAlignmentApprovalService(self.storage_root).load_current(
+                result.document_id
+            )
+        except ValueError as exc:
+            if str(exc).startswith("No approved design alignment"):
+                return None
+            raise DocumentProcessingError("Approval", str(exc)) from exc
+        except OSError as exc:
+            raise DocumentProcessingError("Approval", str(exc)) from exc
+        if approved.alignment.candidate_sha256 != candidate.candidate_sha256:
+            return None
+        return DesignAlignmentApprovalPreview(
+            alignment_sha256=approved.alignment.alignment_sha256,
+            figma_snapshot_sha256=approved.alignment.figma_snapshot_sha256,
+        )
+
+    def publish_copilot_with_design(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> str:
+        try:
+            candidate = self._candidate_for_proof(result, proof)
+            self._require_current_knowledge(result, candidate)
+            design_approval = DesignAlignmentApprovalService(self.storage_root).load_current(
+                result.document_id
+            )
+            if design_approval.alignment.candidate_sha256 != candidate.candidate_sha256:
+                raise ValueError("Approved Figma mapping belongs to a different candidate")
+            output = copilot_context_output_path(candidate, self.storage_root, result.document_id)
+            return TopicRenderer().render(
+                candidate, output, design_alignment=design_approval
+            ).context_path.read_text(encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Approval", str(exc)) from exc
+
     def list_figma_snapshots(
         self, result: ProcessingResult
     ) -> list[FigmaSnapshotPreview]:
@@ -330,6 +427,18 @@ class DocumentProcessingService:
         if candidate.source_id != result.source_id:
             raise ValueError("Candidate does not belong to this document revision")
         return candidate
+
+    def _require_current_knowledge(
+        self, result: ProcessingResult, candidate: KnowledgeCandidate
+    ) -> Path:
+        current_path = ApprovalService(self.storage_root).current_path(result.document_id)
+        approved = KnowledgeCandidate.model_validate_json(current_path.read_text(encoding="utf-8"))
+        if approved.candidate_sha256 != candidate.candidate_sha256:
+            raise ValueError("Current approved knowledge belongs to a different candidate")
+        ApprovalService(self.storage_root).require_approved_snapshot(
+            current_path, candidate, document_id=result.document_id
+        )
+        return current_path
 
     @staticmethod
     def _alignment_preview(alignment) -> DesignAlignmentDraftPreview:

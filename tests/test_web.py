@@ -6,11 +6,13 @@ from fastapi.testclient import TestClient
 
 from doc2agent.application import (
     CandidateProof,
+    DesignAlignmentApprovalPreview,
     DesignAlignmentDraftPreview,
     DocumentProcessingError,
     FigmaImportRequestPreview,
     FigmaNodePreview,
     FigmaSnapshotPreview,
+    KnowledgeApprovalPreview,
     ProcessingResult,
     ProofEvidence,
     ProofFact,
@@ -25,6 +27,8 @@ class StubProcessingService:
         self.document_ids: list[str | None] = []
         self.review_approvals: list[bool] = []
         self.figma_import_requests: list[FigmaImportRequestPreview] = []
+        self.knowledge_approval: KnowledgeApprovalPreview | None = None
+        self.design_alignment_approval: DesignAlignmentApprovalPreview | None = None
 
     def process(
         self,
@@ -72,6 +76,46 @@ class StubProcessingService:
         assert approved_by == "reviewer"
         assert proof.candidate_sha256 == "b" * 64
         return "# Approved knowledge\n\n- Explicit requirement\n"
+
+    def approve_knowledge(
+        self, result: ProcessingResult, proof: CandidateProof, approved_by: str
+    ) -> KnowledgeApprovalPreview:
+        assert approved_by == "reviewer"
+        self.knowledge_approval = KnowledgeApprovalPreview(
+            candidate_sha256=proof.candidate_sha256
+        )
+        return self.knowledge_approval
+
+    def current_knowledge_approval(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> KnowledgeApprovalPreview | None:
+        return self.knowledge_approval
+
+    def approve_design_alignment(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        alignment_sha256: str,
+        approved_by: str,
+    ) -> DesignAlignmentApprovalPreview:
+        assert approved_by == "reviewer"
+        self.design_alignment_approval = DesignAlignmentApprovalPreview(
+            alignment_sha256=alignment_sha256,
+            figma_snapshot_sha256="c" * 64,
+        )
+        return self.design_alignment_approval
+
+    def current_design_alignment_approval(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> DesignAlignmentApprovalPreview | None:
+        return self.design_alignment_approval
+
+    def publish_copilot_with_design(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> str:
+        assert self.knowledge_approval is not None
+        assert self.design_alignment_approval is not None
+        return "# Approved knowledge with Figma\n\n- Explicit requirement\n"
 
     def list_figma_snapshots(
         self, result: ProcessingResult,
@@ -333,6 +377,66 @@ def test_candidate_review_creates_a_figma_mapping_draft() -> None:
     assert response.status_code == 200
     assert "Figma mapping drafts" in response.text
     assert "fact:explicit-requirement" in response.text
+
+
+def test_figma_approval_requires_knowledge_then_mapping_before_publish() -> None:
+    class FigmaApprovalProcessingService(StubProcessingService):
+        def __init__(self, result: ProcessingResult | Exception) -> None:
+            super().__init__(result)
+            self.drafts = [
+                DesignAlignmentDraftPreview(
+                    alignment_sha256="e" * 64,
+                    figma_snapshot_sha256="c" * 64,
+                    annotation_id="fact:explicit-requirement",
+                    evidence_block_id="block:reviewed",
+                    figma_node_id="2:15",
+                    status="matches",
+                )
+            ]
+
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[],
+                )
+            ]
+
+        def list_design_alignment_drafts(
+            self, result: ProcessingResult, proof: CandidateProof
+        ) -> list[DesignAlignmentDraftPreview]:
+            return self.drafts
+
+    service = FigmaApprovalProcessingService(_result())
+    client = TestClient(create_app(service=service))
+    client.post("/documents/process", files={"file": ("example.docx", b"document bytes")})
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+
+    review = client.post(f"/documents/{artifact_id}/candidate")
+    assert "Approve knowledge" in review.text
+    assert "Approve and publish Copilot Markdown" not in review.text
+
+    knowledge = client.post(
+        f"/documents/{artifact_id}/approve-knowledge", data={"approved_by": "reviewer"}
+    )
+    assert knowledge.status_code == 200
+    assert "Approve this Figma mapping" in knowledge.text
+
+    mapping = client.post(
+        f"/documents/{artifact_id}/approve-design-alignment",
+        data={"alignment_sha256": "e" * 64, "approved_by": "reviewer"},
+    )
+    assert mapping.status_code == 200
+    assert "Publish Copilot Markdown with approved Figma mapping" in mapping.text
+
+    published = client.post(f"/documents/{artifact_id}/publish-copilot-with-design")
+    assert published.status_code == 200
+    assert "Published Copilot Markdown" in published.text
+    assert "Approved knowledge with Figma" in published.text
 
 
 def test_unsupported_extension_returns_readable_error() -> None:
