@@ -421,6 +421,7 @@ def test_figma_approval_requires_knowledge_then_mapping_before_publish() -> None
     review = client.post(f"/documents/{artifact_id}/candidate")
     assert "Approve knowledge" in review.text
     assert "Approve and publish Copilot Markdown" not in review.text
+    assert 'disabled>Save Copilot Markdown</button>' in review.text
 
     knowledge = client.post(
         f"/documents/{artifact_id}/approve-knowledge", data={"approved_by": "reviewer"}
@@ -433,7 +434,7 @@ def test_figma_approval_requires_knowledge_then_mapping_before_publish() -> None
         data={"alignment_sha256": "e" * 64, "approved_by": "reviewer"},
     )
     assert mapping.status_code == 200
-    assert "Publish Copilot Markdown with approved Figma mapping" in mapping.text
+    assert "Save Copilot Markdown with approved Figma mapping" in mapping.text
 
     published = client.post(f"/documents/{artifact_id}/publish-copilot-with-design")
     assert published.status_code == 200

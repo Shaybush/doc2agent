@@ -124,11 +124,15 @@
       {% if design_alignment_approval %}
         <p>Figma mapping approved: <code>{{ design_alignment_approval.alignment_sha256 }}</code>.</p>
         <form hx-post="/documents/{{ artifact_id }}/publish-copilot-with-design" hx-target="#processing-result" hx-swap="innerHTML" hx-indicator="#approval-loader">
-          <button type="submit">Publish Copilot Markdown with approved Figma mapping</button>
+          <button type="submit">Save Copilot Markdown with approved Figma mapping</button>
           <span id="approval-loader" class="loader htmx-indicator" role="status">Publishing Copilot Markdown…</span>
         </form>
       {% elif knowledge_approval %}
         <p class="hint">Approve one mapping draft above before publishing Copilot Markdown with Figma context.</p>
+        <button type="button" disabled>Save Copilot Markdown</button>
+      {% else %}
+        <p class="hint">Approve knowledge first. The Markdown save action stays locked until the Figma mapping is also approved.</p>
+        <button type="button" disabled>Save Copilot Markdown</button>
       {% endif %}
     </section>
   {% else %}

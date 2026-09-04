@@ -9,6 +9,7 @@ main { max-width: 960px; margin: 3rem auto; padding: 0 1rem; }
 form, .result { background: #fff; border: 1px solid #dbe3ee; border-radius: .5rem; padding: 1rem; }
 form { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
 button, .button { background: #2563eb; border: 0; border-radius: .3rem; color: #fff; cursor: pointer; padding: .55rem .8rem; text-decoration: none; }
+button:disabled { background: #94a3b8; cursor: not-allowed; }
 .result { margin-top: 1.5rem; }
 .status { color: #166534; font-weight: 700; text-transform: uppercase; }
 .error { border-color: #ef4444; }
