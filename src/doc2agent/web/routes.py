@@ -223,6 +223,22 @@ def create_router() -> APIRouter:
             return _error_response(request, exc.stage, exc.reason)
         return _candidate_response(request, artifact_id, result, proof)
 
+    @router.post("/documents/{artifact_id}/reuse-design-alignment")
+    async def reuse_design_alignment(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.reuse_design_alignment_draft(
+                result, proof, str(form.get("alignment_sha256", ""))
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
     @router.post("/documents/{artifact_id}/approve-knowledge")
     async def approve_knowledge(artifact_id: str, request: Request):
         form = await request.form()
@@ -389,6 +405,9 @@ def _candidate_response(
         figma_snapshots = service.list_figma_snapshots(result)
         figma_import_requests = service.list_figma_import_requests(result)
         design_alignment_drafts = service.list_design_alignment_drafts(result, proof)
+        reusable_design_alignment_drafts = service.list_reusable_design_alignment_drafts(
+            result, proof
+        )
         knowledge_approval = service.current_knowledge_approval(result, proof)
         design_alignment_approval = service.current_design_alignment_approval(result, proof)
     except DocumentProcessingError as exc:
@@ -402,6 +421,7 @@ def _candidate_response(
             "figma_snapshots": figma_snapshots,
             "figma_import_requests": figma_import_requests,
             "design_alignment_drafts": design_alignment_drafts,
+            "reusable_design_alignment_drafts": reusable_design_alignment_drafts,
             "knowledge_approval": knowledge_approval,
             "design_alignment_approval": design_alignment_approval,
         },

@@ -76,6 +76,7 @@ class DesignAlignmentDraftPreview(BaseModel):
     alignment_sha256: str
     figma_snapshot_sha256: str
     bindings: list[DesignAlignmentBindingPreview]
+    source_candidate_sha256: str | None = None
 
 
 class KnowledgeApprovalPreview(BaseModel):

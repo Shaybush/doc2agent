@@ -416,6 +416,62 @@ class DocumentProcessingService:
             if alignment.candidate_sha256 == proof.candidate_sha256
         ]
 
+    def list_reusable_design_alignment_drafts(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> list[DesignAlignmentDraftPreview]:
+        """Offer only older drafts whose bindings still validate for this candidate."""
+
+        try:
+            candidate = self._candidate_for_proof(result, proof)
+            store = DesignAlignmentStore(self.storage_root)
+            reusable: list[DesignAlignmentDraftPreview] = []
+            for alignment in store.list(result.source_id):
+                if (
+                    alignment.structural_sha256 != candidate.structural_sha256
+                    or alignment.candidate_sha256 == candidate.candidate_sha256
+                ):
+                    continue
+                snapshot = FigmaSnapshotStore(self.storage_root).load(
+                    result.source_id, alignment.figma_snapshot_sha256
+                )
+                try:
+                    DesignAlignmentBuilder().build(candidate, snapshot, alignment.bindings)
+                except ValueError:
+                    continue
+                reusable.append(
+                    self._alignment_preview(alignment).model_copy(
+                        update={"source_candidate_sha256": alignment.candidate_sha256}
+                    )
+                )
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
+        return reusable
+
+    def reuse_design_alignment_draft(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        alignment_sha256: str,
+    ) -> DesignAlignmentDraftPreview:
+        """Copy a still-valid draft to the current candidate without approving it."""
+
+        try:
+            candidate = self._candidate_for_proof(result, proof)
+            store = DesignAlignmentStore(self.storage_root)
+            existing = store.load(result.source_id, alignment_sha256)
+            if existing.candidate_sha256 == candidate.candidate_sha256:
+                raise ValueError("Mapping draft already belongs to the current candidate")
+            if existing.structural_sha256 != candidate.structural_sha256:
+                raise ValueError("Mapping draft belongs to a different document revision")
+            snapshot = FigmaSnapshotStore(self.storage_root).load(
+                result.source_id, existing.figma_snapshot_sha256
+            )
+            copied = DesignAlignmentBuilder().build(candidate, snapshot, existing.bindings)
+            store.write(copied)
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
+        return self._alignment_preview(copied)
+
     def create_design_alignment_package(
         self,
         result: ProcessingResult,

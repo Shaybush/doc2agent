@@ -119,6 +119,23 @@
       {% endif %}
     </section>
   {% endif %}
+  {% if reusable_design_alignment_drafts %}
+    <section class="figma-review">
+      <h2>Reusable Figma mapping drafts</h2>
+      <p class="hint">These drafts came from an earlier candidate but their requirement/evidence bindings still validate for the current candidate. Reusing a draft does not approve it.</p>
+      <ul>
+        {% for draft in reusable_design_alignment_drafts %}
+          <li>
+            <code>{{ draft.alignment_sha256 }}</code> from candidate <code>{{ draft.source_candidate_sha256 }}</code>
+            <form hx-post="/documents/{{ artifact_id }}/reuse-design-alignment" hx-target="#workflow" hx-swap="innerHTML">
+              <input type="hidden" name="alignment_sha256" value="{{ draft.alignment_sha256 }}">
+              <button type="submit">Reuse for current candidate</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
   {% if figma_snapshots or figma_import_requests or design_alignment_drafts %}
     <section class="figma-review">
       <h2>Approval sequence</h2>

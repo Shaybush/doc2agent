@@ -187,6 +187,19 @@ class StubProcessingService:
     ) -> list[DesignAlignmentDraftPreview]:
         return []
 
+    def list_reusable_design_alignment_drafts(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> list[DesignAlignmentDraftPreview]:
+        return []
+
+    def reuse_design_alignment_draft(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        alignment_sha256: str,
+    ) -> DesignAlignmentDraftPreview:
+        return self.create_design_alignment_draft(result, proof)
+
 
 def _result() -> ProcessingResult:
     return ProcessingResult(
@@ -465,6 +478,64 @@ def test_mapping_draft_uses_one_requirement_evidence_pair() -> None:
     )
 
     assert response.status_code == 200
+
+
+def test_candidate_review_can_reuse_a_valid_older_mapping_draft() -> None:
+    class ReuseProcessingService(StubProcessingService):
+        def __init__(self, result: ProcessingResult | Exception) -> None:
+            super().__init__(result)
+            self.reused: list[str] = []
+
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[],
+                )
+            ]
+
+        def list_reusable_design_alignment_drafts(
+            self, result: ProcessingResult, proof: CandidateProof
+        ) -> list[DesignAlignmentDraftPreview]:
+            if self.reused:
+                return []
+            return [
+                DesignAlignmentDraftPreview(
+                    alignment_sha256="e" * 64,
+                    figma_snapshot_sha256="c" * 64,
+                    source_candidate_sha256="d" * 64,
+                    bindings=[],
+                )
+            ]
+
+        def reuse_design_alignment_draft(
+            self,
+            result: ProcessingResult,
+            proof: CandidateProof,
+            alignment_sha256: str,
+        ) -> DesignAlignmentDraftPreview:
+            self.reused.append(alignment_sha256)
+            return super().reuse_design_alignment_draft(result, proof, alignment_sha256)
+
+    service = ReuseProcessingService(_result())
+    client = TestClient(create_app(service=service))
+    client.post("/documents/process", files={"file": ("example.docx", b"document bytes")})
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+
+    review = client.post(f"/documents/{artifact_id}/candidate")
+    assert "Reusable Figma mapping drafts" in review.text
+    assert "Reuse for current candidate" in review.text
+
+    reused = client.post(
+        f"/documents/{artifact_id}/reuse-design-alignment",
+        data={"alignment_sha256": "e" * 64},
+    )
+    assert reused.status_code == 200
+    assert service.reused == ["e" * 64]
 
 
 def test_figma_approval_requires_knowledge_then_mapping_before_publish() -> None:
