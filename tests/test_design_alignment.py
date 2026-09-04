@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from doc2agent import cli
 from doc2agent.analyzer import StructuralAnalyzer
+from doc2agent.application import DocumentProcessingService
 from doc2agent.design import (
     DesignAlignmentApprovalService,
     DesignAlignmentBuilder,
@@ -105,6 +106,44 @@ def test_snapshot_hash_is_stable_and_rejects_non_figma_url() -> None:
             kind="FRAME",
             figma_url="https://example.com/design/registration",
         )
+
+
+def test_figma_save_requires_every_snapshot_frame_to_be_mapped(tmp_path: Path) -> None:
+    candidate, block_id = _candidate(tmp_path)
+    snapshot = FigmaSnapshot.build(
+        figma_file_key="registration-file",
+        figma_url="https://www.figma.com/design/registration-file/Registration",
+        nodes=[
+            FigmaNode(
+                node_id="12:56",
+                name="Registration",
+                kind="FRAME",
+                figma_url="https://www.figma.com/design/registration-file/Registration?node-id=12-56",
+            ),
+            FigmaNode(
+                node_id="12:80",
+                name="Invalid email",
+                kind="FRAME",
+                figma_url="https://www.figma.com/design/registration-file/Registration?node-id=12-80",
+            ),
+        ],
+        adapter="fixture",
+        captured_at=datetime(2026, 9, 4, tzinfo=UTC),
+    )
+    draft = DesignAlignmentBuilder().build(
+        candidate,
+        snapshot,
+        [
+            DesignBinding(
+                annotation_id="fact:invalid-email",
+                evidence_block_id=block_id,
+                figma_node_id="12:56",
+                status="matches",
+            )
+        ],
+    )
+
+    assert DocumentProcessingService._unmapped_node_ids(snapshot, [draft]) == {"12:80"}
 
 
 def test_snapshot_store_is_source_revision_scoped_and_idempotent(tmp_path: Path) -> None:

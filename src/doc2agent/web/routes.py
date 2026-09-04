@@ -429,6 +429,7 @@ def _candidate_response(
         figma_snapshots = service.list_figma_snapshots(result)
         figma_import_requests = service.list_figma_import_requests(result)
         design_alignment_drafts = service.list_design_alignment_drafts(result, proof)
+        unmapped_figma_nodes = service.list_unmapped_figma_nodes(result, proof)
     except DocumentProcessingError as exc:
         return _error_response(request, exc.stage, exc.reason)
     return templates.TemplateResponse(
@@ -440,6 +441,7 @@ def _candidate_response(
             "figma_snapshots": figma_snapshots,
             "figma_import_requests": figma_import_requests,
             "design_alignment_drafts": design_alignment_drafts,
+            "unmapped_figma_nodes": unmapped_figma_nodes,
         },
     )
 

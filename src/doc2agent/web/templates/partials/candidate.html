@@ -102,7 +102,15 @@
   {% if figma_snapshots or figma_import_requests or design_alignment_drafts %}
     <section class="figma-review">
       <h2>Save Copilot Markdown</h2>
-      {% if design_alignment_drafts %}
+      {% if unmapped_figma_nodes %}
+        <p class="warning">Map every frame in the selected snapshot before saving:</p>
+        <ul>
+          {% for node in unmapped_figma_nodes %}
+            <li><bdi>{{ node.name }}</bdi> <code>{{ node.node_id }}</code></li>
+          {% endfor %}
+        </ul>
+        <button type="button" disabled>Save Copilot Markdown</button>
+      {% elif design_alignment_drafts %}
         <p class="hint">This one action approves the current knowledge and the mappings above, then saves Copilot Markdown.</p>
         <form hx-post="/documents/{{ artifact_id }}/approve-and-publish-figma" hx-target="#processing-result" hx-swap="innerHTML" hx-indicator="#approval-loader">
           <label for="figma_approved_by">Approver</label>

@@ -79,6 +79,12 @@ class DesignAlignmentDraftPreview(BaseModel):
     source_candidate_sha256: str | None = None
 
 
+class UnmappedFigmaNodePreview(BaseModel):
+    snapshot_sha256: str
+    node_id: str
+    name: str
+
+
 class KnowledgeApprovalPreview(BaseModel):
     candidate_sha256: str
 

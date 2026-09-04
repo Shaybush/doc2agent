@@ -19,6 +19,7 @@ from doc2agent.application import (
     ProcessingResult,
     ProofEvidence,
     ProofFact,
+    UnmappedFigmaNodePreview,
 )
 from doc2agent.web.app import create_app
 
@@ -200,6 +201,11 @@ class StubProcessingService:
     def list_reusable_design_alignment_drafts(
         self, result: ProcessingResult, proof: CandidateProof
     ) -> list[DesignAlignmentDraftPreview]:
+        return []
+
+    def list_unmapped_figma_nodes(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> list[UnmappedFigmaNodePreview]:
         return []
 
     def reuse_design_alignment_draft(

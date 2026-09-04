@@ -11,6 +11,7 @@ from .models import (
     ProcessingResult,
     ProofEvidence,
     ProofFact,
+    UnmappedFigmaNodePreview,
 )
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     "ProcessingResult",
     "ProofEvidence",
     "ProofFact",
+    "UnmappedFigmaNodePreview",
 ]

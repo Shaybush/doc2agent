@@ -37,6 +37,7 @@ from .models import (
     ProcessingResult,
     ProofEvidence,
     ProofFact,
+    UnmappedFigmaNodePreview,
 )
 
 
@@ -329,6 +330,12 @@ class DocumentProcessingService:
             snapshot = FigmaSnapshotStore(self.storage_root).load(
                 result.source_id, next(iter(snapshot_hashes))
             )
+            unmapped_node_ids = self._unmapped_node_ids(snapshot, drafts)
+            if unmapped_node_ids:
+                raise ValueError(
+                    "Map every frame in the selected Figma snapshot before saving Markdown: "
+                    + ", ".join(sorted(unmapped_node_ids))
+                )
             alignment = DesignAlignmentBuilder().build(
                 candidate,
                 snapshot,
@@ -473,6 +480,42 @@ class DocumentProcessingService:
             if alignment.candidate_sha256 == proof.candidate_sha256
         ]
 
+    def list_unmapped_figma_nodes(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> list[UnmappedFigmaNodePreview]:
+        """Show selected frames that still need an explicit mapping decision."""
+
+        try:
+            candidate = self._candidate_for_proof(result, proof)
+            drafts = [
+                alignment
+                for alignment in DesignAlignmentStore(self.storage_root).list(result.source_id)
+                if (
+                    alignment.candidate_sha256 == candidate.candidate_sha256
+                    and len(alignment.bindings) == 1
+                )
+            ]
+            by_snapshot: dict[str, list] = {}
+            for draft in drafts:
+                by_snapshot.setdefault(draft.figma_snapshot_sha256, []).append(draft)
+            unmapped: list[UnmappedFigmaNodePreview] = []
+            for snapshot_sha256, snapshot_drafts in by_snapshot.items():
+                snapshot = FigmaSnapshotStore(self.storage_root).load(
+                    result.source_id, snapshot_sha256
+                )
+                for node_id in self._unmapped_node_ids(snapshot, snapshot_drafts):
+                    node = next(node for node in snapshot.nodes if node.node_id == node_id)
+                    unmapped.append(
+                        UnmappedFigmaNodePreview(
+                            snapshot_sha256=snapshot_sha256,
+                            node_id=node.node_id,
+                            name=node.name,
+                        )
+                    )
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
+        return unmapped
+
     def list_reusable_design_alignment_drafts(
         self, result: ProcessingResult, proof: CandidateProof
     ) -> list[DesignAlignmentDraftPreview]:
@@ -604,6 +647,16 @@ class DocumentProcessingService:
             current_path, candidate, document_id=result.document_id
         )
         return current_path
+
+    @staticmethod
+    def _unmapped_node_ids(snapshot, drafts) -> set[str]:
+        mapped_node_ids = {
+            binding.figma_node_id
+            for draft in drafts
+            for binding in draft.bindings
+            if binding.figma_node_id is not None
+        }
+        return {node.node_id for node in snapshot.nodes} - mapped_node_ids
 
     @staticmethod
     def _alignment_preview(alignment) -> DesignAlignmentDraftPreview:
