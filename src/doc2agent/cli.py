@@ -13,6 +13,7 @@ from doc2agent.design import (
     DesignAlignmentBuilder,
     DesignAlignmentCandidate,
     DesignBinding,
+    FigmaImportRequestStore,
     FigmaSnapshot,
     FigmaSnapshotStore,
 )
@@ -310,6 +311,30 @@ def import_figma_snapshot(
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"Figma snapshot: {output_path}")
     typer.echo(f"Snapshot hash: {snapshot_model.snapshot_sha256}")
+
+
+@app.command("complete-figma-import-request")
+def complete_figma_import_request(
+    snapshot: Path = typer.Argument(..., exists=True, dir_okay=False),
+    source_id: str = typer.Option(..., "--source-id"),
+    request_sha256: str = typer.Option(..., "--request-sha256"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+) -> None:
+    """Store an MCP-captured snapshot and fulfil its explicit Figma URL request."""
+
+    if IngestService(storage).document_id_for_source(source_id) is None:
+        raise typer.BadParameter("Figma snapshot source is not registered")
+    try:
+        snapshot_model = FigmaSnapshot.model_validate_json(snapshot.read_text(encoding="utf-8"))
+        requests = FigmaImportRequestStore(storage)
+        requests.assert_can_fulfill(source_id, request_sha256, snapshot_model)
+        output_path = FigmaSnapshotStore(storage).write(source_id, snapshot_model)
+        completed = requests.fulfill(source_id, request_sha256, snapshot_model)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Figma snapshot: {output_path}")
+    typer.echo(f"Snapshot hash: {snapshot_model.snapshot_sha256}")
+    typer.echo(f"Figma import request: {completed.request_sha256} ({completed.status})")
 
 
 @app.command("create-design-alignment")

@@ -235,6 +235,8 @@ class DocumentProcessingService:
             request_sha256=request.request_sha256,
             figma_url=request.figma_url,
             requested_at=request.requested_at.isoformat(),
+            status=request.status,
+            snapshot_sha256=request.snapshot_sha256,
         )
 
     def list_figma_import_requests(
@@ -249,6 +251,8 @@ class DocumentProcessingService:
                 request_sha256=request.request_sha256,
                 figma_url=request.figma_url,
                 requested_at=request.requested_at.isoformat(),
+                status=request.status,
+                snapshot_sha256=request.snapshot_sha256,
             )
             for request in requests
         ]

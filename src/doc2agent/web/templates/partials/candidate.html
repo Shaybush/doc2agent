@@ -30,7 +30,7 @@
       <p class="hint">Pending capture requests for this document revision:</p>
       <ul>
         {% for import_request in figma_import_requests %}
-          <li><a href="{{ import_request.figma_url }}" target="_blank" rel="noopener noreferrer">{{ import_request.figma_url }}</a> <code>{{ import_request.request_sha256 }}</code></li>
+          <li><a href="{{ import_request.figma_url }}" target="_blank" rel="noopener noreferrer">{{ import_request.figma_url }}</a> <code>{{ import_request.request_sha256 }}</code> — {{ import_request.status }}{% if import_request.snapshot_sha256 %} <code>{{ import_request.snapshot_sha256 }}</code>{% endif %}</li>
         {% endfor %}
       </ul>
     {% endif %}

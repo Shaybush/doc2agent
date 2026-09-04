@@ -59,3 +59,5 @@ class FigmaImportRequestPreview(BaseModel):
     request_sha256: str
     figma_url: str
     requested_at: str
+    status: str
+    snapshot_sha256: str | None = None

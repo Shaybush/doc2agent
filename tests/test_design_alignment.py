@@ -134,8 +134,56 @@ def test_figma_import_request_is_source_scoped_and_idempotent(tmp_path: Path) ->
 
     assert first == second
     assert store.list(source_id) == [first]
+    snapshot = _snapshot()
+    request = store.create(
+        source_id,
+        "https://www.figma.com/design/registration-file/Registration",
+    )
+    assert store.assert_can_fulfill(source_id, request.request_sha256, snapshot) == request
+    fulfilled = store.fulfill(source_id, request.request_sha256, snapshot)
+    assert fulfilled.status == "captured"
+    assert fulfilled.snapshot_sha256 == snapshot.snapshot_sha256
+    with pytest.raises(ValueError, match="different Figma file"):
+        store.assert_can_fulfill(
+            source_id,
+            request.request_sha256,
+            snapshot.model_copy(update={"figma_file_key": "other-file"}),
+        )
     with pytest.raises(ValueError, match="figma.com"):
         store.create(source_id, "https://example.com/not-figma")
+
+
+def test_cli_completes_registered_figma_import_request(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    source = Path(__file__).parent / "fixtures" / "hebrew_test_document.docx"
+    ingested = IngestService(storage).ingest(source, approve_review=True)
+    assert ingested.accepted
+    snapshot = _snapshot()
+    request = FigmaImportRequestStore(storage).create(
+        ingested.manifest.source_id,
+        "https://www.figma.com/design/registration-file/Registration",
+    )
+    snapshot_path = tmp_path / "snapshot.figma.json"
+    snapshot_path.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "complete-figma-import-request",
+            str(snapshot_path),
+            "--source-id",
+            ingested.manifest.source_id,
+            "--request-sha256",
+            request.request_sha256,
+            "--storage",
+            str(storage),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "(captured)" in result.output
+    completed = FigmaImportRequestStore(storage).list(ingested.manifest.source_id)[0]
+    assert completed.status == "captured"
 
 
 def test_cli_imports_snapshot_only_for_a_registered_source(tmp_path: Path) -> None:

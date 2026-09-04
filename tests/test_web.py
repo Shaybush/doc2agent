@@ -82,6 +82,7 @@ class StubProcessingService:
             request_sha256="d" * 64,
             figma_url=figma_url,
             requested_at="2026-09-04T00:00:00+00:00",
+            status="pending",
         )
         self.figma_import_requests = [preview]
         return preview
