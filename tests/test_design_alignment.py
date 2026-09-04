@@ -13,6 +13,7 @@ from doc2agent.design import (
     DesignBinding,
     FigmaNode,
     FigmaSnapshot,
+    FigmaSnapshotStore,
 )
 from doc2agent.semantic import (
     ApprovalService,
@@ -96,6 +97,27 @@ def test_snapshot_hash_is_stable_and_rejects_non_figma_url() -> None:
             kind="FRAME",
             figma_url="https://example.com/design/registration",
         )
+
+
+def test_snapshot_store_is_source_revision_scoped_and_idempotent(tmp_path: Path) -> None:
+    snapshot = _snapshot()
+    source_id = "sha256:" + "a" * 64
+    store = FigmaSnapshotStore(tmp_path / "storage")
+
+    path = store.write(source_id, snapshot)
+
+    assert path == (
+        tmp_path
+        / "storage"
+        / "artifacts"
+        / ("sha256-" + "a" * 64)
+        / "figma"
+        / f"{snapshot.snapshot_sha256}.figma.json"
+    )
+    assert store.write(source_id, snapshot) == path
+    assert store.load(source_id, snapshot.snapshot_sha256) == snapshot
+    with pytest.raises(ValueError, match="Source ID"):
+        store.write("source:unknown", snapshot)
 
 
 def test_alignment_requires_annotation_evidence_and_selected_figma_node(tmp_path: Path) -> None:
