@@ -29,7 +29,10 @@ from doc2agent.source_manifest import SourceManifest
 def _candidate(tmp_path: Path):
     source = tmp_path / "registration.md"
     source.write_text(
-        "# הרשמה\n\nכתובת אימייל לא תקינה מציגה הודעת שגיאה.\n",
+        "<div dir=\"rtl\">\n\n"
+        "# הרשמה\n\n"
+        "כתובת אימייל לא תקינה מציגה הודעת שגיאה.\n\n"
+        "</div>\n",
         encoding="utf-8",
     )
     document = StructuralAnalyzer().analyze(
