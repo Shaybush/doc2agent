@@ -52,24 +52,17 @@
                   <form class="mapping-form" hx-post="/documents/{{ artifact_id }}/design-alignment" hx-target="#workflow" hx-swap="innerHTML">
                     <input type="hidden" name="snapshot_sha256" value="{{ snapshot.snapshot_sha256 }}">
                     <input type="hidden" name="figma_node_id" value="{{ node.node_id }}">
-                    <label>Requirement
-                      <select name="annotation_id" dir="auto" required>
-                        {% for fact in proof.facts %}
-                          <option value="{{ fact.annotation_id }}">{{ fact.kind }}: {{ fact.value }}</option>
+                    <fieldset class="binding-choice" dir="auto">
+                      <legend>Requirement and evidence</legend>
+                      {% for fact in proof.facts %}
+                        {% for evidence in fact.evidence %}
+                          <label>
+                            <input type="radio" name="binding_choice" value='{{ [fact.annotation_id, evidence.block_id] | tojson }}' required>
+                            <span><bdi>{{ fact.kind }}: {{ fact.value }}</bdi><br><small><bdi>{{ evidence.source_text }}</bdi> — lines {{ evidence.start_line }}–{{ evidence.end_line }}</small></span>
+                          </label>
                         {% endfor %}
-                      </select>
-                    </label>
-                    <label>Evidence block
-                      <select name="evidence_block_id" dir="auto" required>
-                        {% for fact in proof.facts %}
-                          <optgroup label="{{ fact.kind }}: {{ fact.value }}">
-                            {% for evidence in fact.evidence %}
-                              <option value="{{ evidence.block_id }}">{{ evidence.source_text }}</option>
-                            {% endfor %}
-                          </optgroup>
-                        {% endfor %}
-                      </select>
-                    </label>
+                      {% endfor %}
+                    </fieldset>
                     <label>Status
                       <select name="status">
                         <option value="matches">matches</option>

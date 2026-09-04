@@ -23,6 +23,9 @@ summary { cursor: pointer; font-weight: 600; }
 .mapping-form label { display: grid; gap: .3rem; }
 .mapping-form select { min-width: 0; }
 .mapping-form button { justify-self: start; }
+.binding-choice { border: 1px solid #dbe3ee; border-radius: .3rem; display: grid; gap: .5rem; grid-column: 1 / -1; }
+.binding-choice label { align-items: start; grid-template-columns: auto 1fr; }
+.binding-choice small { color: #64748b; }
 .mapping-package-form { align-items: stretch; display: block; }
 .mapping-package-form ul { display: grid; gap: .75rem; padding-left: 1.5rem; }
 @media (max-width: 640px) { .mapping-form { grid-template-columns: 1fr; } }

@@ -168,12 +168,13 @@ def create_router() -> APIRouter:
         if result is None or proof is None:
             return _error_response(request, "Figma", "Generate and review a candidate first.")
         try:
+            annotation_id, evidence_block_id = _binding_fields(form)
             request.app.state.processing_service.create_design_alignment_draft(
                 result,
                 proof,
                 snapshot_sha256=str(form.get("snapshot_sha256", "")),
-                annotation_id=str(form.get("annotation_id", "")),
-                evidence_block_id=str(form.get("evidence_block_id", "")),
+                annotation_id=annotation_id,
+                evidence_block_id=evidence_block_id,
                 figma_node_id=str(form.get("figma_node_id", "")),
                 status=str(form.get("status", "")),
             )
@@ -355,6 +356,26 @@ async def _save_upload(
 
 def _download_stem(filename: str) -> str:
     return safe_name(Path(filename).stem)
+
+
+def _binding_fields(form) -> tuple[str, str]:
+    """Accept one UI-selected requirement/evidence pair or the legacy fields."""
+
+    choice = form.get("binding_choice")
+    if choice is None:
+        return str(form.get("annotation_id", "")), str(form.get("evidence_block_id", ""))
+    try:
+        annotation_id, evidence_block_id = json.loads(str(choice))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise DocumentProcessingError("Figma", "Choose one requirement and its evidence.") from exc
+    if not (
+        isinstance(annotation_id, str)
+        and annotation_id
+        and isinstance(evidence_block_id, str)
+        and evidence_block_id
+    ):
+        raise DocumentProcessingError("Figma", "Choose one requirement and its evidence.")
+    return annotation_id, evidence_block_id
 
 
 def _candidate_response(

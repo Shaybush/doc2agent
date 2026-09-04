@@ -329,6 +329,7 @@ def test_candidate_review_displays_imported_figma_frames() -> None:
     assert "2:15" in review.text
     assert "Create mapping draft" in review.text
     assert 'class="mapping-details"' in review.text
+    assert 'name="binding_choice"' in review.text
 
 
 def test_candidate_review_can_request_a_figma_snapshot() -> None:
@@ -410,6 +411,43 @@ def test_candidate_review_creates_a_figma_mapping_draft() -> None:
     assert response.status_code == 200
     assert "Figma mapping drafts" in response.text
     assert "fact:explicit-requirement" in response.text
+
+
+def test_mapping_draft_uses_one_requirement_evidence_pair() -> None:
+    class PairProcessingService(StubProcessingService):
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[],
+                )
+            ]
+
+        def create_design_alignment_draft(self, *args, **kwargs) -> DesignAlignmentDraftPreview:
+            assert kwargs["annotation_id"] == "fact:explicit-requirement"
+            assert kwargs["evidence_block_id"] == "block:reviewed"
+            return super().create_design_alignment_draft(*args, **kwargs)
+
+    client = TestClient(create_app(service=PairProcessingService(_result())))
+    client.post("/documents/process", files={"file": ("example.docx", b"document bytes")})
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+    client.post(f"/documents/{artifact_id}/candidate")
+
+    response = client.post(
+        f"/documents/{artifact_id}/design-alignment",
+        data={
+            "snapshot_sha256": "c" * 64,
+            "binding_choice": '["fact:explicit-requirement", "block:reviewed"]',
+            "figma_node_id": "2:15",
+            "status": "matches",
+        },
+    )
+
+    assert response.status_code == 200
 
 
 def test_figma_approval_requires_knowledge_then_mapping_before_publish() -> None:
