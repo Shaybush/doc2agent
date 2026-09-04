@@ -376,6 +376,7 @@ def test_candidate_review_displays_imported_figma_frames() -> None:
     assert "Create mapping draft" in review.text
     assert 'class="mapping-details"' in review.text
     assert 'name="binding_choice"' in review.text
+    assert 'select name="figma_node_id"' in review.text
 
 
 def test_candidate_review_can_request_a_figma_snapshot() -> None:
