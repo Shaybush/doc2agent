@@ -376,6 +376,8 @@ def test_candidate_review_displays_imported_figma_frames() -> None:
     assert "Create mapping draft" in review.text
     assert 'name="binding_choice"' in review.text
     assert 'class="inline-mapping-form"' in review.text
+    assert 'hx-trigger="change"' in review.text
+    assert 'hx-include="this"' not in review.text
 
 
 def test_candidate_review_can_request_a_figma_snapshot() -> None:
