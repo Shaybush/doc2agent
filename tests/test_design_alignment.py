@@ -218,6 +218,86 @@ def test_cli_creates_design_alignment_from_explicit_bindings(tmp_path: Path) -> 
     assert len(alignment_paths) == 1
 
 
+def test_cli_approves_alignment_and_renders_figma_context(tmp_path: Path) -> None:
+    candidate, block_id = _candidate(tmp_path)
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    (storage / "source-catalog.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "sources": {
+                    candidate.source_id: {
+                        "source_id": candidate.source_id,
+                        "document_id": "document:registration",
+                        "filename": "registration.md",
+                        "source_path": "storage/sources/registration.md",
+                        "received_at": "2026-09-04T00:00:00+00:00",
+                    }
+                },
+                "documents": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    snapshot = _snapshot()
+    FigmaSnapshotStore(storage).write(candidate.source_id, snapshot)
+    knowledge_path = ApprovalService(storage).approve(
+        candidate,
+        document_id="document:registration",
+        approved_by="reviewer",
+    )
+    alignment = DesignAlignmentBuilder().build(
+        candidate,
+        snapshot,
+        [
+            DesignBinding(
+                annotation_id="fact:invalid-email",
+                evidence_block_id=block_id,
+                figma_node_id="12:56",
+                status="matches",
+            )
+        ],
+    )
+    alignment_path = tmp_path / "alignment.design-alignment.json"
+    alignment_path.write_text(alignment.model_dump_json(indent=2), encoding="utf-8")
+
+    approved = CliRunner().invoke(
+        cli.app,
+        [
+            "approve-design-alignment",
+            str(alignment_path),
+            "--approved",
+            str(knowledge_path),
+            "--by",
+            "reviewer",
+            "--storage",
+            str(storage),
+        ],
+    )
+
+    assert approved.exit_code == 0, approved.output
+    approved_design = DesignAlignmentApprovalService(storage).current_path(
+        "document:registration"
+    )
+    rendered = CliRunner().invoke(
+        cli.app,
+        [
+            "render-copilot",
+            "--approved",
+            str(knowledge_path),
+            "--storage",
+            str(storage),
+            "--design-alignment",
+            str(approved_design),
+        ],
+    )
+
+    assert rendered.exit_code == 0, rendered.output
+    context = storage / "copilot-context/registration--document-registration/registration.md"
+    assert "## Approved Figma designs" in context.read_text(encoding="utf-8")
+
+
 def test_alignment_requires_annotation_evidence_and_selected_figma_node(tmp_path: Path) -> None:
     candidate, block_id = _candidate(tmp_path)
     snapshot = _snapshot()

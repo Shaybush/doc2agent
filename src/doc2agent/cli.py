@@ -8,7 +8,10 @@ from pydantic import TypeAdapter
 from doc2agent.analyzer import StructuralAnalyzer
 from doc2agent.converter import Converter
 from doc2agent.design import (
+    ApprovedDesignAlignment,
+    DesignAlignmentApprovalService,
     DesignAlignmentBuilder,
+    DesignAlignmentCandidate,
     DesignBinding,
     FigmaSnapshot,
     FigmaSnapshotStore,
@@ -355,6 +358,43 @@ def create_design_alignment(
     typer.echo(f"Alignment hash: {alignment.alignment_sha256}")
 
 
+@app.command("approve-design-alignment")
+def approve_design_alignment(
+    alignment: Path = typer.Argument(..., exists=True, dir_okay=False),
+    approved: Path = typer.Option(..., "--approved", exists=True, dir_okay=False),
+    approved_by: str = typer.Option(..., "--by"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+    document_id: str | None = typer.Option(None, "--document-id"),
+) -> None:
+    """Approve one mapping against an already approved knowledge snapshot."""
+
+    try:
+        knowledge = KnowledgeCandidate.model_validate_json(approved.read_text(encoding="utf-8"))
+        resolved_document_id = IngestService(storage).document_id_for_source(knowledge.source_id)
+        if resolved_document_id is None:
+            raise ValueError("Approved knowledge source is not registered")
+        if document_id is not None and document_id != resolved_document_id:
+            raise ValueError("--document-id does not match the approved knowledge")
+        alignment_model = DesignAlignmentCandidate.model_validate_json(
+            alignment.read_text(encoding="utf-8")
+        )
+        snapshot = FigmaSnapshotStore(storage).load(
+            knowledge.source_id,
+            alignment_model.figma_snapshot_sha256,
+        )
+        output_path = DesignAlignmentApprovalService(storage).approve(
+            alignment_model,
+            knowledge,
+            snapshot,
+            document_id=resolved_document_id,
+            approved_by=approved_by,
+            knowledge_path=approved,
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Approved design alignment: {output_path}")
+
+
 @app.command("render-copilot")
 def render_copilot(
     approved: Path | None = typer.Option(
@@ -365,6 +405,11 @@ def render_copilot(
     storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
     document_id: str | None = typer.Option(None, "--document-id"),
     output: Path | None = typer.Option(None, "--output", "-o"),
+    design_alignment: Path | None = typer.Option(
+        None,
+        "--design-alignment",
+        dir_okay=False,
+    ),
 ) -> None:
     snapshot_storage = (
         _storage_root_for_approved_path(approved, storage)
@@ -397,7 +442,24 @@ def render_copilot(
         approved_model,
         snapshot_storage,
     )
-    result = TopicRenderer().render(approved_model, output)
+    design_alignment_model: ApprovedDesignAlignment | None = None
+    if design_alignment is not None:
+        try:
+            design_alignment_model = ApprovedDesignAlignment.model_validate_json(
+                design_alignment.read_text(encoding="utf-8")
+            )
+            DesignAlignmentApprovalService(snapshot_storage).require_approved_snapshot(
+                design_alignment,
+                design_alignment_model,
+                document_id=catalog_document_id,
+            )
+        except (OSError, ValueError) as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    result = TopicRenderer().render(
+        approved_model,
+        output,
+        design_alignment=design_alignment_model,
+    )
     typer.echo(f"Copilot context: {result.output_root}")
     typer.echo(f"Knowledge Markdown: {result.context_path}")
     typer.echo(f"Manifest: {result.manifest_path}")

@@ -14,6 +14,7 @@ from .snapshot_store import FigmaSnapshotStore
 __all__ = [
     "ApprovedDesignAlignment",
     "DesignAlignmentBuilder",
+    "DesignAlignmentCandidate",
     "DesignAlignmentApprovalService",
     "DesignAlignmentCandidate",
     "DesignBinding",

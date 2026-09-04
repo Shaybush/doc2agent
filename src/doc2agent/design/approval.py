@@ -39,6 +39,9 @@ class DesignAlignmentApprovalService:
     def current_path(self, document_id: str) -> Path:
         return self.document_dir(document_id) / "current.design-alignment.json"
 
+    def archive_path(self, document_id: str, alignment_sha256: str) -> Path:
+        return self.document_dir(document_id) / f"{alignment_sha256}.design-alignment.json"
+
     def approve(
         self,
         alignment: DesignAlignmentCandidate,
@@ -66,9 +69,7 @@ class DesignAlignmentApprovalService:
             approved_at=approved_at or datetime.now(UTC),
         )
         payload = approved.model_dump_json(indent=2, exclude_none=True)
-        archive_path = self.document_dir(document_id) / (
-            f"{alignment.alignment_sha256}.design-alignment.json"
-        )
+        archive_path = self.archive_path(document_id, alignment.alignment_sha256)
         self._write_if_missing(archive_path, payload)
         current_path = self.current_path(document_id)
         self._atomic_write(current_path, payload)
@@ -79,6 +80,20 @@ class DesignAlignmentApprovalService:
         if not path.is_file():
             raise ValueError(f"No approved design alignment for document: {document_id}")
         return ApprovedDesignAlignment.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def require_approved_snapshot(
+        self,
+        path: Path,
+        approved: ApprovedDesignAlignment,
+        *,
+        document_id: str,
+    ) -> None:
+        allowed_paths = {
+            self.current_path(document_id),
+            self.archive_path(document_id, approved.alignment.alignment_sha256),
+        }
+        if path.resolve() not in {allowed_path.resolve() for allowed_path in allowed_paths}:
+            raise ValueError("Copilot context requires an approved design alignment")
 
     @staticmethod
     def _validate(
