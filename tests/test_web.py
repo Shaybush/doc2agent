@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from doc2agent.application import (
     CandidateProof,
     DocumentProcessingError,
+    FigmaNodePreview,
+    FigmaSnapshotPreview,
     ProcessingResult,
     ProofEvidence,
     ProofFact,
@@ -65,6 +67,11 @@ class StubProcessingService:
         assert approved_by == "reviewer"
         assert proof.candidate_sha256 == "b" * 64
         return "# Approved knowledge\n\n- Explicit requirement\n"
+
+    def list_figma_snapshots(
+        self, result: ProcessingResult,
+    ) -> list[FigmaSnapshotPreview]:
+        return []
 
 
 def _result() -> ProcessingResult:
@@ -170,6 +177,44 @@ def test_candidate_proof_can_be_reviewed_then_approved_and_published() -> None:
     assert published.status_code == 200
     assert "Published Copilot Markdown" in published.text
     assert "Explicit requirement" in published.text
+
+
+def test_candidate_review_displays_imported_figma_frames() -> None:
+    class FigmaAwareProcessingService(StubProcessingService):
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[
+                        FigmaNodePreview(
+                            node_id="2:15",
+                            name="אימייל לא תקין",
+                            kind="FRAME",
+                            figma_url=(
+                                "https://www.figma.com/design/file-key/Registration?node-id=2-15"
+                            ),
+                        )
+                    ],
+                )
+            ]
+
+    client = TestClient(create_app(service=FigmaAwareProcessingService(_result())))
+    client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+
+    review = client.post(f"/documents/{artifact_id}/candidate")
+
+    assert review.status_code == 200
+    assert "Figma snapshots" in review.text
+    assert "אימייל לא תקין" in review.text
+    assert "2:15" in review.text
 
 
 def test_unsupported_extension_returns_readable_error() -> None:

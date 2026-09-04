@@ -38,6 +38,16 @@ class FigmaSnapshotStore:
             raise ValueError(f"Figma snapshot was not found: {snapshot_sha256}")
         return FigmaSnapshot.model_validate_json(path.read_text(encoding="utf-8"))
 
+    def list(self, source_id: str) -> list[FigmaSnapshot]:
+        """Return snapshots already imported for exactly one source revision."""
+
+        source_key = self._source_key(source_id)
+        directory = self.storage_root / "artifacts" / source_key / "figma"
+        return [
+            FigmaSnapshot.model_validate_json(path.read_text(encoding="utf-8"))
+            for path in sorted(directory.glob("*.figma.json"))
+        ]
+
     @staticmethod
     def _source_key(source_id: str) -> str:
         if not source_id.startswith("sha256:"):

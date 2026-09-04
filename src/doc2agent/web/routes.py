@@ -11,7 +11,11 @@ from fastapi import APIRouter, Form, Request, UploadFile
 from fastapi.responses import PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
-from doc2agent.application import CandidateProof, DocumentProcessingError, ProcessingResult
+from doc2agent.application import (
+    CandidateProof,
+    DocumentProcessingError,
+    ProcessingResult,
+)
 from doc2agent.converter import safe_name
 
 logger = logging.getLogger(__name__)
@@ -138,10 +142,20 @@ def create_router() -> APIRouter:
                 request, "Candidate", "Could not generate a candidate. Check server logs."
             )
         artifacts.set_candidate(artifact_id, proof)
+        try:
+            figma_snapshots = request.app.state.processing_service.list_figma_snapshots(
+                result
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
         return templates.TemplateResponse(
             request=request,
             name="partials/candidate.html",
-            context={"artifact_id": artifact_id, "proof": proof},
+            context={
+                "artifact_id": artifact_id,
+                "proof": proof,
+                "figma_snapshots": figma_snapshots,
+            },
         )
 
     @router.post("/documents/{artifact_id}/approve")

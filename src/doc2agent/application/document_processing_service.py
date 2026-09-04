@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from doc2agent.design import FigmaSnapshotStore
 from doc2agent.ingest import IngestService
 from doc2agent.pipeline import Doc2AgentPipeline, PipelineStatus
 from doc2agent.security.models import SecurityDecision
@@ -17,7 +18,14 @@ from doc2agent.semantic import (
 )
 from doc2agent.validator import ValidationReport
 
-from .models import CandidateProof, ProcessingResult, ProofEvidence, ProofFact
+from .models import (
+    CandidateProof,
+    FigmaNodePreview,
+    FigmaSnapshotPreview,
+    ProcessingResult,
+    ProofEvidence,
+    ProofFact,
+)
 
 
 class DocumentProcessingError(Exception):
@@ -183,6 +191,33 @@ class DocumentProcessingService:
             )
         except (OSError, ValueError) as exc:
             raise DocumentProcessingError("Approval", str(exc)) from exc
+
+    def list_figma_snapshots(
+        self, result: ProcessingResult
+    ) -> list[FigmaSnapshotPreview]:
+        """Expose already imported immutable snapshots without fetching Figma."""
+
+        try:
+            snapshots = FigmaSnapshotStore(self.storage_root).list(result.source_id)
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
+        return [
+            FigmaSnapshotPreview(
+                snapshot_sha256=snapshot.snapshot_sha256,
+                figma_url=snapshot.figma_url,
+                captured_at=snapshot.captured_at.isoformat(),
+                nodes=[
+                    FigmaNodePreview(
+                        node_id=node.node_id,
+                        name=node.name,
+                        kind=node.kind,
+                        figma_url=node.figma_url,
+                    )
+                    for node in snapshot.nodes
+                ],
+            )
+            for snapshot in snapshots
+        ]
 
     def _artifact_path(self, source_id: str, directory: str, suffix: str) -> Path:
         paths = sorted(

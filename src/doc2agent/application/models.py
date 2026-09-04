@@ -39,3 +39,17 @@ class CandidateProof(BaseModel):
     candidate_sha256: str
     reviewed_block_ids: list[str]
     facts: list[ProofFact]
+
+
+class FigmaNodePreview(BaseModel):
+    node_id: str
+    name: str
+    kind: str
+    figma_url: str
+
+
+class FigmaSnapshotPreview(BaseModel):
+    snapshot_sha256: str
+    figma_url: str
+    captured_at: str
+    nodes: list[FigmaNodePreview]

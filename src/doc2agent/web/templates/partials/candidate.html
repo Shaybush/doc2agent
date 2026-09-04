@@ -18,6 +18,25 @@
   {% else %}
     <p class="hint">The provider found no explicitly supported facts.</p>
   {% endif %}
+  <section class="figma-review">
+    <h2>Figma snapshots</h2>
+    {% if figma_snapshots %}
+      <p class="hint">Read-only snapshots already imported for this exact document revision.</p>
+      {% for snapshot in figma_snapshots %}
+        <article>
+          <p><a href="{{ snapshot.figma_url }}" target="_blank" rel="noopener noreferrer">Open Figma file</a></p>
+          <p>Snapshot: <code>{{ snapshot.snapshot_sha256 }}</code></p>
+          <ul>
+            {% for node in snapshot.nodes %}
+              <li><a href="{{ node.figma_url }}" target="_blank" rel="noopener noreferrer">{{ node.name }}</a> <code>{{ node.node_id }}</code> <span class="hint">{{ node.kind }}</span></li>
+            {% endfor %}
+          </ul>
+        </article>
+      {% endfor %}
+    {% else %}
+      <p class="hint">No Figma snapshot has been imported for this document revision.</p>
+    {% endif %}
+  </section>
   <form hx-post="/documents/{{ artifact_id }}/approve" hx-target="#processing-result" hx-swap="innerHTML" hx-indicator="#approval-loader">
     <label for="approved_by">Approver</label>
     <input id="approved_by" name="approved_by" required>
