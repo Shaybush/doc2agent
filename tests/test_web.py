@@ -400,6 +400,42 @@ def test_candidate_review_can_request_a_figma_snapshot() -> None:
     assert "https://www.figma.com/design/file-key/Registration" in response.text
 
 
+def test_candidate_review_can_refresh_figma_status_without_requesting_capture() -> None:
+    class RefreshProcessingService(StubProcessingService):
+        def request_figma_capture(
+            self, result: ProcessingResult, figma_url: str
+        ) -> FigmaImportRequestPreview:
+            raise AssertionError("Refresh must not create a Figma capture request")
+
+        def list_figma_import_requests(
+            self, result: ProcessingResult
+        ) -> list[FigmaImportRequestPreview]:
+            return [
+                FigmaImportRequestPreview(
+                    request_sha256="d" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    requested_at="2026-09-04T00:00:00+00:00",
+                    status="captured",
+                    snapshot_sha256="c" * 64,
+                )
+            ]
+
+    client = TestClient(create_app(service=RefreshProcessingService(_result())))
+    client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+    client.post(f"/documents/{artifact_id}/candidate")
+
+    response = client.get(f"/documents/{artifact_id}/figma-status")
+
+    assert response.status_code == 200
+    assert "Refresh Figma status" in response.text
+    assert "captured" in response.text
+    assert "c" * 64 in response.text
+
+
 def test_candidate_review_creates_a_figma_mapping_draft() -> None:
     class MappingProcessingService(StubProcessingService):
         def __init__(self, result: ProcessingResult | Exception) -> None:

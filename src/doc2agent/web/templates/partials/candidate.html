@@ -27,6 +27,7 @@
       <button type="submit">Request Figma snapshot</button>
     </form>
     {% if figma_import_requests %}
+      <button type="button" hx-get="/documents/{{ artifact_id }}/figma-status" hx-target="#workflow" hx-swap="innerHTML">Refresh Figma status</button>
       <p class="hint">Pending capture requests for this document revision:</p>
       <ul>
         {% for import_request in figma_import_requests %}

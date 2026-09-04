@@ -159,6 +159,17 @@ def create_router() -> APIRouter:
             return _error_response(request, exc.stage, exc.reason)
         return _candidate_response(request, artifact_id, result, proof)
 
+    @router.get("/documents/{artifact_id}/figma-status")
+    def refresh_figma_status(artifact_id: str, request: Request):
+        """Re-render the review using the latest separately captured Figma state."""
+
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        return _candidate_response(request, artifact_id, result, proof)
+
     @router.post("/documents/{artifact_id}/design-alignment")
     async def create_design_alignment(artifact_id: str, request: Request):
         form = await request.form()
