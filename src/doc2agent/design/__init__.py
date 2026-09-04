@@ -10,6 +10,7 @@ from .alignment import (
 )
 from .alignment_store import DesignAlignmentStore
 from .approval import DesignAlignmentApprovalService
+from .capture_manifest import FigmaCaptureNode, FigmaMcpCaptureManifest
 from .import_request import FigmaImportRequest, FigmaImportRequestStore
 from .snapshot_store import FigmaSnapshotStore
 
@@ -20,6 +21,8 @@ __all__ = [
     "DesignAlignmentStore",
     "DesignAlignmentApprovalService",
     "DesignBinding",
+    "FigmaCaptureNode",
+    "FigmaMcpCaptureManifest",
     "FigmaImportRequest",
     "FigmaImportRequestStore",
     "FigmaNode",

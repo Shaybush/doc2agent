@@ -15,7 +15,9 @@ from doc2agent.design import (
     DesignAlignmentBuilder,
     DesignAlignmentStore,
     DesignBinding,
+    FigmaCaptureNode,
     FigmaImportRequestStore,
+    FigmaMcpCaptureManifest,
     FigmaNode,
     FigmaSnapshot,
     FigmaSnapshotStore,
@@ -152,6 +154,68 @@ def test_figma_import_request_is_source_scoped_and_idempotent(tmp_path: Path) ->
         )
     with pytest.raises(ValueError, match="figma.com"):
         store.create(source_id, "https://example.com/not-figma")
+
+
+def test_figma_mcp_capture_manifest_builds_one_snapshot_for_multiple_nodes() -> None:
+    capture = FigmaMcpCaptureManifest(
+        figma_url="https://www.figma.com/design/registration-file/Registration?node-id=12-56",
+        captured_at=datetime(2026, 9, 4, tzinfo=UTC),
+        nodes=[
+            FigmaCaptureNode(node_id="12:56", name="Registration", kind="FRAME"),
+            FigmaCaptureNode(node_id="12:80", name="Invalid email", kind="FRAME"),
+        ],
+    )
+
+    snapshot = capture.build_snapshot()
+
+    assert snapshot.figma_file_key == "registration-file"
+    assert [node.node_id for node in snapshot.nodes] == ["12:56", "12:80"]
+    assert snapshot.nodes[1].figma_url.endswith("node-id=12-80")
+
+
+def test_capture_command_completes_request_with_multiple_figma_nodes(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    source = Path(__file__).parent / "fixtures" / "hebrew_test_document.docx"
+    ingested = IngestService(storage).ingest(source, approve_review=True)
+    assert ingested.accepted
+    request = FigmaImportRequestStore(storage).create(
+        ingested.manifest.source_id,
+        "https://www.figma.com/design/registration-file/Registration",
+    )
+    capture_path = tmp_path / "capture.json"
+    capture_path.write_text(
+        FigmaMcpCaptureManifest(
+            figma_url=request.figma_url,
+            captured_at=datetime(2026, 9, 4, tzinfo=UTC),
+            nodes=[
+                FigmaCaptureNode(node_id="12:56", name="Registration", kind="FRAME"),
+                FigmaCaptureNode(node_id="12:80", name="Invalid email", kind="FRAME"),
+            ],
+        ).model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "capture-figma-import-request",
+            str(capture_path),
+            "--source-id",
+            ingested.manifest.source_id,
+            "--request-sha256",
+            request.request_sha256,
+            "--storage",
+            str(storage),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "(captured)" in result.output
+    completed = FigmaImportRequestStore(storage).list(ingested.manifest.source_id)[0]
+    snapshot = FigmaSnapshotStore(storage).load(
+        ingested.manifest.source_id, completed.snapshot_sha256 or ""
+    )
+    assert [node.node_id for node in snapshot.nodes] == ["12:56", "12:80"]
 
 
 def test_cli_completes_registered_figma_import_request(tmp_path: Path) -> None:

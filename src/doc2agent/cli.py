@@ -15,6 +15,7 @@ from doc2agent.design import (
     DesignAlignmentStore,
     DesignBinding,
     FigmaImportRequestStore,
+    FigmaMcpCaptureManifest,
     FigmaSnapshot,
     FigmaSnapshotStore,
 )
@@ -335,6 +336,33 @@ def complete_figma_import_request(
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"Figma snapshot: {output_path}")
     typer.echo(f"Snapshot hash: {snapshot_model.snapshot_sha256}")
+    typer.echo(f"Figma import request: {completed.request_sha256} ({completed.status})")
+
+
+@app.command("capture-figma-import-request")
+def capture_figma_import_request(
+    capture: Path = typer.Argument(..., exists=True, dir_okay=False),
+    source_id: str = typer.Option(..., "--source-id"),
+    request_sha256: str = typer.Option(..., "--request-sha256"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+) -> None:
+    """Normalize a multi-node Figma MCP capture and fulfil one import request."""
+
+    if IngestService(storage).document_id_for_source(source_id) is None:
+        raise typer.BadParameter("Figma snapshot source is not registered")
+    try:
+        manifest = FigmaMcpCaptureManifest.model_validate_json(
+            capture.read_text(encoding="utf-8")
+        )
+        snapshot = manifest.build_snapshot()
+        requests = FigmaImportRequestStore(storage)
+        requests.assert_can_fulfill(source_id, request_sha256, snapshot)
+        output_path = FigmaSnapshotStore(storage).write(source_id, snapshot)
+        completed = requests.fulfill(source_id, request_sha256, snapshot)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Figma snapshot: {output_path}")
+    typer.echo(f"Snapshot hash: {snapshot.snapshot_sha256}")
     typer.echo(f"Figma import request: {completed.request_sha256} ({completed.status})")
 
 
