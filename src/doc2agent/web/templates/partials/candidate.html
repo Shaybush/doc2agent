@@ -92,21 +92,38 @@
   {% if design_alignment_drafts %}
     <section class="figma-review">
       <h2>Figma mapping drafts</h2>
-      <p class="hint">Drafts are reviewable decisions only. They are not approved or published.</p>
+      <p class="hint">A review package combines two or more mappings from the same immutable Figma snapshot. Drafts are not approved or published.</p>
+      <form class="mapping-package-form" hx-post="/documents/{{ artifact_id }}/design-alignment-package" hx-target="#workflow" hx-swap="innerHTML">
       <ul>
         {% for draft in design_alignment_drafts %}
           <li>
-            <code>{{ draft.annotation_id }}</code> → <code>{{ draft.figma_node_id }}</code> ({{ draft.status }}) <code>{{ draft.alignment_sha256 }}</code>
-            {% if knowledge_approval %}
-              <form hx-post="/documents/{{ artifact_id }}/approve-design-alignment" hx-target="#workflow" hx-swap="innerHTML">
-                <input type="hidden" name="alignment_sha256" value="{{ draft.alignment_sha256 }}">
-                <label>Design approver <input name="approved_by" required></label>
-                <button type="submit">Approve this Figma mapping</button>
-              </form>
+            {% if draft.bindings | length == 1 %}
+              <label><input type="checkbox" name="alignment_sha256" value="{{ draft.alignment_sha256 }}"> Include in a review package</label>
+            {% else %}
+              <strong>Review package — {{ draft.bindings | length }} mappings</strong>
             {% endif %}
+            <code>{{ draft.alignment_sha256 }}</code>
+            <ul>
+              {% for binding in draft.bindings %}
+                <li><code>{{ binding.annotation_id }}</code> → <code>{{ binding.figma_node_id }}</code> ({{ binding.status }})</li>
+              {% endfor %}
+            </ul>
           </li>
         {% endfor %}
       </ul>
+      <button type="submit">Create review package from selected mappings</button>
+      </form>
+      {% if knowledge_approval %}
+        <h3>Approve a mapping or review package</h3>
+        {% for draft in design_alignment_drafts %}
+          <form hx-post="/documents/{{ artifact_id }}/approve-design-alignment" hx-target="#workflow" hx-swap="innerHTML">
+            <input type="hidden" name="alignment_sha256" value="{{ draft.alignment_sha256 }}">
+            <span>{% if draft.bindings | length > 1 %}Review package{% else %}Mapping{% endif %}: <code>{{ draft.alignment_sha256 }}</code></span>
+            <label>Design approver <input name="approved_by" required></label>
+            <button type="submit">Approve</button>
+          </form>
+        {% endfor %}
+      {% endif %}
     </section>
   {% endif %}
   {% if figma_snapshots or figma_import_requests or design_alignment_drafts %}

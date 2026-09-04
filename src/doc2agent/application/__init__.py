@@ -2,6 +2,7 @@ from .document_processing_service import DocumentProcessingError, DocumentProces
 from .models import (
     CandidateProof,
     DesignAlignmentApprovalPreview,
+    DesignAlignmentBindingPreview,
     DesignAlignmentDraftPreview,
     FigmaImportRequestPreview,
     FigmaNodePreview,
@@ -17,6 +18,7 @@ __all__ = [
     "DocumentProcessingService",
     "CandidateProof",
     "DesignAlignmentApprovalPreview",
+    "DesignAlignmentBindingPreview",
     "DesignAlignmentDraftPreview",
     "FigmaImportRequestPreview",
     "FigmaNodePreview",

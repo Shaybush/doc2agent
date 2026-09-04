@@ -206,6 +206,22 @@ def create_router() -> APIRouter:
             context={"artifact_id": artifact_id, "result": updated_result},
         )
 
+    @router.post("/documents/{artifact_id}/design-alignment-package")
+    async def create_design_alignment_package(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.create_design_alignment_package(
+                result, proof, [str(value) for value in form.getlist("alignment_sha256")]
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
     @router.post("/documents/{artifact_id}/approve-knowledge")
     async def approve_knowledge(artifact_id: str, request: Request):
         form = await request.form()

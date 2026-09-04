@@ -65,13 +65,17 @@ class FigmaImportRequestPreview(BaseModel):
     snapshot_sha256: str | None = None
 
 
+class DesignAlignmentBindingPreview(BaseModel):
+    annotation_id: str | None = None
+    evidence_block_id: str | None = None
+    figma_node_id: str | None = None
+    status: str
+
+
 class DesignAlignmentDraftPreview(BaseModel):
     alignment_sha256: str
     figma_snapshot_sha256: str
-    annotation_id: str
-    evidence_block_id: str
-    figma_node_id: str
-    status: str
+    bindings: list[DesignAlignmentBindingPreview]
 
 
 class KnowledgeApprovalPreview(BaseModel):

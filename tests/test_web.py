@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from doc2agent.application import (
     CandidateProof,
     DesignAlignmentApprovalPreview,
+    DesignAlignmentBindingPreview,
     DesignAlignmentDraftPreview,
     DocumentProcessingError,
     FigmaImportRequestPreview,
@@ -143,10 +144,40 @@ class StubProcessingService:
         return DesignAlignmentDraftPreview(
             alignment_sha256="e" * 64,
             figma_snapshot_sha256="c" * 64,
-            annotation_id="fact:explicit-requirement",
-            evidence_block_id="block:reviewed",
-            figma_node_id="2:15",
-            status="matches",
+            bindings=[
+                DesignAlignmentBindingPreview(
+                    annotation_id="fact:explicit-requirement",
+                    evidence_block_id="block:reviewed",
+                    figma_node_id="2:15",
+                    status="matches",
+                )
+            ],
+        )
+
+    def create_design_alignment_package(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        alignment_sha256s: list[str],
+    ) -> DesignAlignmentDraftPreview:
+        assert len(alignment_sha256s) >= 2
+        return DesignAlignmentDraftPreview(
+            alignment_sha256="g" * 64,
+            figma_snapshot_sha256="c" * 64,
+            bindings=[
+                DesignAlignmentBindingPreview(
+                    annotation_id="fact:explicit-requirement",
+                    evidence_block_id="block:reviewed",
+                    figma_node_id="2:15",
+                    status="matches",
+                ),
+                DesignAlignmentBindingPreview(
+                    annotation_id="fact:another-requirement",
+                    evidence_block_id="block:another",
+                    figma_node_id="2:16",
+                    status="partial",
+                ),
+            ],
         )
 
     def list_design_alignment_drafts(
@@ -389,10 +420,14 @@ def test_figma_approval_requires_knowledge_then_mapping_before_publish() -> None
                 DesignAlignmentDraftPreview(
                     alignment_sha256="e" * 64,
                     figma_snapshot_sha256="c" * 64,
-                    annotation_id="fact:explicit-requirement",
-                    evidence_block_id="block:reviewed",
-                    figma_node_id="2:15",
-                    status="matches",
+                    bindings=[
+                        DesignAlignmentBindingPreview(
+                            annotation_id="fact:explicit-requirement",
+                            evidence_block_id="block:reviewed",
+                            figma_node_id="2:15",
+                            status="matches",
+                        )
+                    ],
                 )
             ]
 
@@ -427,7 +462,7 @@ def test_figma_approval_requires_knowledge_then_mapping_before_publish() -> None
         f"/documents/{artifact_id}/approve-knowledge", data={"approved_by": "reviewer"}
     )
     assert knowledge.status_code == 200
-    assert "Approve this Figma mapping" in knowledge.text
+    assert "Approve a mapping or review package" in knowledge.text
 
     mapping = client.post(
         f"/documents/{artifact_id}/approve-design-alignment",
@@ -440,6 +475,82 @@ def test_figma_approval_requires_knowledge_then_mapping_before_publish() -> None
     assert published.status_code == 200
     assert "Published Copilot Markdown" in published.text
     assert "Approved knowledge with Figma" in published.text
+
+
+def test_candidate_review_can_create_a_same_snapshot_review_package() -> None:
+    class PackageProcessingService(StubProcessingService):
+        def __init__(self, result: ProcessingResult | Exception) -> None:
+            super().__init__(result)
+            self.drafts = [
+                DesignAlignmentDraftPreview(
+                    alignment_sha256="e" * 64,
+                    figma_snapshot_sha256="c" * 64,
+                    bindings=[
+                        DesignAlignmentBindingPreview(
+                            annotation_id="fact:explicit-requirement",
+                            evidence_block_id="block:reviewed",
+                            figma_node_id="2:2",
+                            status="matches",
+                        )
+                    ],
+                ),
+                DesignAlignmentDraftPreview(
+                    alignment_sha256="f" * 64,
+                    figma_snapshot_sha256="c" * 64,
+                    bindings=[
+                        DesignAlignmentBindingPreview(
+                            annotation_id="fact:another-requirement",
+                            evidence_block_id="block:another",
+                            figma_node_id="2:15",
+                            status="partial",
+                        )
+                    ],
+                ),
+            ]
+
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[],
+                )
+            ]
+
+        def list_design_alignment_drafts(
+            self, result: ProcessingResult, proof: CandidateProof
+        ) -> list[DesignAlignmentDraftPreview]:
+            return self.drafts
+
+        def create_design_alignment_package(
+            self,
+            result: ProcessingResult,
+            proof: CandidateProof,
+            alignment_sha256s: list[str],
+        ) -> DesignAlignmentDraftPreview:
+            assert alignment_sha256s == ["e" * 64, "f" * 64]
+            package = super().create_design_alignment_package(
+                result, proof, alignment_sha256s
+            )
+            self.drafts.append(package)
+            return package
+
+    client = TestClient(create_app(service=PackageProcessingService(_result())))
+    client.post("/documents/process", files={"file": ("example.docx", b"document bytes")})
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+    client.post(f"/documents/{artifact_id}/candidate")
+
+    response = client.post(
+        f"/documents/{artifact_id}/design-alignment-package",
+        data={"alignment_sha256": ["e" * 64, "f" * 64]},
+    )
+
+    assert response.status_code == 200
+    assert "Review package — 2 mappings" in response.text
+    assert "g" * 64 in response.text
 
 
 def test_unsupported_extension_returns_readable_error() -> None:

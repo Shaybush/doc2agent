@@ -28,6 +28,7 @@ from doc2agent.validator import ValidationReport
 from .models import (
     CandidateProof,
     DesignAlignmentApprovalPreview,
+    DesignAlignmentBindingPreview,
     DesignAlignmentDraftPreview,
     FigmaImportRequestPreview,
     FigmaNodePreview,
@@ -411,6 +412,53 @@ class DocumentProcessingService:
             if alignment.candidate_sha256 == proof.candidate_sha256
         ]
 
+    def create_design_alignment_package(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        alignment_sha256s: list[str],
+    ) -> DesignAlignmentDraftPreview:
+        """Combine reviewed single mappings from one immutable Figma snapshot."""
+
+        selected_hashes = sorted(alignment_sha256s)
+        if len(selected_hashes) < 2:
+            raise DocumentProcessingError(
+                "Figma", "Choose at least two mapping drafts to create a review package."
+            )
+        if len(set(selected_hashes)) != len(selected_hashes):
+            raise DocumentProcessingError("Figma", "Choose each mapping draft only once.")
+        try:
+            candidate = self._candidate_for_proof(result, proof)
+            store = DesignAlignmentStore(self.storage_root)
+            drafts = [
+                store.load(result.source_id, alignment_hash)
+                for alignment_hash in selected_hashes
+            ]
+            snapshot_hashes = {draft.figma_snapshot_sha256 for draft in drafts}
+            if len(snapshot_hashes) != 1:
+                raise ValueError(
+                    "A review package can contain mappings from only one Figma snapshot."
+                )
+            for draft in drafts:
+                if (
+                    draft.source_id != candidate.source_id
+                    or draft.structural_sha256 != candidate.structural_sha256
+                    or draft.candidate_sha256 != candidate.candidate_sha256
+                ):
+                    raise ValueError("A selected mapping draft belongs to a different candidate")
+            snapshot = FigmaSnapshotStore(self.storage_root).load(
+                result.source_id, next(iter(snapshot_hashes))
+            )
+            package = DesignAlignmentBuilder().build(
+                candidate,
+                snapshot,
+                [binding for draft in drafts for binding in draft.bindings],
+            )
+            DesignAlignmentStore(self.storage_root).write(package)
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
+        return self._alignment_preview(package)
+
     def _candidate_for_proof(
         self, result: ProcessingResult, proof: CandidateProof
     ) -> KnowledgeCandidate:
@@ -442,16 +490,18 @@ class DocumentProcessingService:
 
     @staticmethod
     def _alignment_preview(alignment) -> DesignAlignmentDraftPreview:
-        binding = alignment.bindings[0]
-        if not binding.annotation_id or not binding.evidence_block_id or not binding.figma_node_id:
-            raise ValueError("Draft alignment is missing a requirement-to-frame binding")
         return DesignAlignmentDraftPreview(
             alignment_sha256=alignment.alignment_sha256,
             figma_snapshot_sha256=alignment.figma_snapshot_sha256,
-            annotation_id=binding.annotation_id,
-            evidence_block_id=binding.evidence_block_id,
-            figma_node_id=binding.figma_node_id,
-            status=binding.status,
+            bindings=[
+                DesignAlignmentBindingPreview(
+                    annotation_id=binding.annotation_id,
+                    evidence_block_id=binding.evidence_block_id,
+                    figma_node_id=binding.figma_node_id,
+                    status=binding.status,
+                )
+                for binding in alignment.bindings
+            ],
         )
 
     def _artifact_path(self, source_id: str, directory: str, suffix: str) -> Path:
