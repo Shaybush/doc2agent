@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from doc2agent.application import (
     CandidateProof,
     DocumentProcessingError,
+    FigmaImportRequestPreview,
     FigmaNodePreview,
     FigmaSnapshotPreview,
     ProcessingResult,
@@ -22,6 +23,7 @@ class StubProcessingService:
         self.sources: list[Path] = []
         self.document_ids: list[str | None] = []
         self.review_approvals: list[bool] = []
+        self.figma_import_requests: list[FigmaImportRequestPreview] = []
 
     def process(
         self,
@@ -72,6 +74,22 @@ class StubProcessingService:
         self, result: ProcessingResult,
     ) -> list[FigmaSnapshotPreview]:
         return []
+
+    def request_figma_capture(
+        self, result: ProcessingResult, figma_url: str
+    ) -> FigmaImportRequestPreview:
+        preview = FigmaImportRequestPreview(
+            request_sha256="d" * 64,
+            figma_url=figma_url,
+            requested_at="2026-09-04T00:00:00+00:00",
+        )
+        self.figma_import_requests = [preview]
+        return preview
+
+    def list_figma_import_requests(
+        self, result: ProcessingResult
+    ) -> list[FigmaImportRequestPreview]:
+        return self.figma_import_requests
 
 
 def _result() -> ProcessingResult:
@@ -215,6 +233,26 @@ def test_candidate_review_displays_imported_figma_frames() -> None:
     assert "Figma snapshots" in review.text
     assert "אימייל לא תקין" in review.text
     assert "2:15" in review.text
+
+
+def test_candidate_review_can_request_a_figma_snapshot() -> None:
+    service = StubProcessingService(_result())
+    client = TestClient(create_app(service=service))
+    client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+    client.post(f"/documents/{artifact_id}/candidate")
+
+    response = client.post(
+        f"/documents/{artifact_id}/figma-import-request",
+        data={"figma_url": "https://www.figma.com/design/file-key/Registration"},
+    )
+
+    assert response.status_code == 200
+    assert "Request Figma snapshot" in response.text
+    assert "https://www.figma.com/design/file-key/Registration" in response.text
 
 
 def test_unsupported_extension_returns_readable_error() -> None:

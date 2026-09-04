@@ -1,6 +1,7 @@
 from .document_processing_service import DocumentProcessingError, DocumentProcessingService
 from .models import (
     CandidateProof,
+    FigmaImportRequestPreview,
     FigmaNodePreview,
     FigmaSnapshotPreview,
     ProcessingResult,
@@ -12,6 +13,7 @@ __all__ = [
     "DocumentProcessingError",
     "DocumentProcessingService",
     "CandidateProof",
+    "FigmaImportRequestPreview",
     "FigmaNodePreview",
     "FigmaSnapshotPreview",
     "ProcessingResult",

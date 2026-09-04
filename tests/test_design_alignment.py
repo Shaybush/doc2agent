@@ -14,6 +14,7 @@ from doc2agent.design import (
     DesignAlignmentApprovalService,
     DesignAlignmentBuilder,
     DesignBinding,
+    FigmaImportRequestStore,
     FigmaNode,
     FigmaSnapshot,
     FigmaSnapshotStore,
@@ -122,6 +123,19 @@ def test_snapshot_store_is_source_revision_scoped_and_idempotent(tmp_path: Path)
     assert store.load(source_id, snapshot.snapshot_sha256) == snapshot
     with pytest.raises(ValueError, match="Source ID"):
         store.write("source:unknown", snapshot)
+
+
+def test_figma_import_request_is_source_scoped_and_idempotent(tmp_path: Path) -> None:
+    source_id = "sha256:" + "b" * 64
+    store = FigmaImportRequestStore(tmp_path / "storage")
+
+    first = store.create(source_id, "https://www.figma.com/design/file-key/Registration")
+    second = store.create(source_id, "https://www.figma.com/design/file-key/Registration")
+
+    assert first == second
+    assert store.list(source_id) == [first]
+    with pytest.raises(ValueError, match="figma.com"):
+        store.create(source_id, "https://example.com/not-figma")
 
 
 def test_cli_imports_snapshot_only_for_a_registered_source(tmp_path: Path) -> None:

@@ -27,7 +27,7 @@ DesignReviewStatus = Literal[
 ]
 
 
-def _validate_figma_url(value: str) -> str:
+def validate_figma_url(value: str) -> str:
     parsed = urlparse(value)
     hostname = parsed.hostname or ""
     if parsed.scheme != "https" or not (hostname == "figma.com" or hostname.endswith(".figma.com")):
@@ -50,7 +50,7 @@ class FigmaNode(BaseModel):
     )
 
     def _validate_url(self) -> FigmaNode:
-        _validate_figma_url(self.figma_url)
+        validate_figma_url(self.figma_url)
         return self
 
 
@@ -69,7 +69,7 @@ class FigmaSnapshot(BaseModel):
 
     @model_validator(mode="after")
     def validate_contract(self) -> FigmaSnapshot:
-        _validate_figma_url(self.figma_url)
+        validate_figma_url(self.figma_url)
         if len({node.node_id for node in self.nodes}) != len(self.nodes):
             raise ValueError("Figma snapshot has duplicate node IDs")
         expected_hash = canonical_json_sha256(

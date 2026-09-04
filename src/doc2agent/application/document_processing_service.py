@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from doc2agent.design import FigmaSnapshotStore
+from doc2agent.design import FigmaImportRequestStore, FigmaSnapshotStore
 from doc2agent.ingest import IngestService
 from doc2agent.pipeline import Doc2AgentPipeline, PipelineStatus
 from doc2agent.security.models import SecurityDecision
@@ -20,6 +20,7 @@ from doc2agent.validator import ValidationReport
 
 from .models import (
     CandidateProof,
+    FigmaImportRequestPreview,
     FigmaNodePreview,
     FigmaSnapshotPreview,
     ProcessingResult,
@@ -217,6 +218,39 @@ class DocumentProcessingService:
                 ],
             )
             for snapshot in snapshots
+        ]
+
+    def request_figma_capture(
+        self, result: ProcessingResult, figma_url: str
+    ) -> FigmaImportRequestPreview:
+        """Record an explicit URL hand-off; no browser request fetches Figma."""
+
+        try:
+            request = FigmaImportRequestStore(self.storage_root).create(
+                result.source_id, figma_url
+            )
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
+        return FigmaImportRequestPreview(
+            request_sha256=request.request_sha256,
+            figma_url=request.figma_url,
+            requested_at=request.requested_at.isoformat(),
+        )
+
+    def list_figma_import_requests(
+        self, result: ProcessingResult
+    ) -> list[FigmaImportRequestPreview]:
+        try:
+            requests = FigmaImportRequestStore(self.storage_root).list(result.source_id)
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
+        return [
+            FigmaImportRequestPreview(
+                request_sha256=request.request_sha256,
+                figma_url=request.figma_url,
+                requested_at=request.requested_at.isoformat(),
+            )
+            for request in requests
         ]
 
     def _artifact_path(self, source_id: str, directory: str, suffix: str) -> Path:

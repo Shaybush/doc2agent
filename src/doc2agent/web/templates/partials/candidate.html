@@ -19,6 +19,23 @@
     <p class="hint">The provider found no explicitly supported facts.</p>
   {% endif %}
   <section class="figma-review">
+    <h2>Add Figma design</h2>
+    <p class="hint">The URL is recorded for this document revision. A configured MCP capture fulfils it separately; the browser does not fetch Figma.</p>
+    <form hx-post="/documents/{{ artifact_id }}/figma-import-request" hx-target="#workflow" hx-swap="innerHTML">
+      <label for="figma_url">Figma URL</label>
+      <input id="figma_url" name="figma_url" type="url" placeholder="https://www.figma.com/design/..." required>
+      <button type="submit">Request Figma snapshot</button>
+    </form>
+    {% if figma_import_requests %}
+      <p class="hint">Pending capture requests for this document revision:</p>
+      <ul>
+        {% for import_request in figma_import_requests %}
+          <li><a href="{{ import_request.figma_url }}" target="_blank" rel="noopener noreferrer">{{ import_request.figma_url }}</a> <code>{{ import_request.request_sha256 }}</code></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+  <section class="figma-review">
     <h2>Figma snapshots</h2>
     {% if figma_snapshots %}
       <p class="hint">Read-only snapshots already imported for this exact document revision.</p>

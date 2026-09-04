@@ -53,3 +53,9 @@ class FigmaSnapshotPreview(BaseModel):
     figma_url: str
     captured_at: str
     nodes: list[FigmaNodePreview]
+
+
+class FigmaImportRequestPreview(BaseModel):
+    request_sha256: str
+    figma_url: str
+    requested_at: str

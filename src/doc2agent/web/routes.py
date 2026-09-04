@@ -142,21 +142,22 @@ def create_router() -> APIRouter:
                 request, "Candidate", "Could not generate a candidate. Check server logs."
             )
         artifacts.set_candidate(artifact_id, proof)
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.post("/documents/{artifact_id}/figma-import-request")
+    async def request_figma_import(artifact_id: str, request: Request):
+        form = await request.form()
+        figma_url = str(form.get("figma_url", ""))
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
         try:
-            figma_snapshots = request.app.state.processing_service.list_figma_snapshots(
-                result
-            )
+            request.app.state.processing_service.request_figma_capture(result, figma_url)
         except DocumentProcessingError as exc:
             return _error_response(request, exc.stage, exc.reason)
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/candidate.html",
-            context={
-                "artifact_id": artifact_id,
-                "proof": proof,
-                "figma_snapshots": figma_snapshots,
-            },
-        )
+        return _candidate_response(request, artifact_id, result, proof)
 
     @router.post("/documents/{artifact_id}/approve")
     async def approve_candidate(artifact_id: str, request: Request):
@@ -258,6 +259,30 @@ async def _save_upload(
 
 def _download_stem(filename: str) -> str:
     return safe_name(Path(filename).stem)
+
+
+def _candidate_response(
+    request: Request,
+    artifact_id: str,
+    result: ProcessingResult,
+    proof: CandidateProof,
+):
+    try:
+        service = request.app.state.processing_service
+        figma_snapshots = service.list_figma_snapshots(result)
+        figma_import_requests = service.list_figma_import_requests(result)
+    except DocumentProcessingError as exc:
+        return _error_response(request, exc.stage, exc.reason)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/candidate.html",
+        context={
+            "artifact_id": artifact_id,
+            "proof": proof,
+            "figma_snapshots": figma_snapshots,
+            "figma_import_requests": figma_import_requests,
+        },
+    )
 
 
 def _error_response(request: Request, stage: str, reason: str):
