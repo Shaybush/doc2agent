@@ -203,7 +203,7 @@ class TopicRenderer:
                 continue
             lines.extend([f"## {COPILOT_CONTEXT_LABELS[kind]}", ""])
             for fact in facts:
-                lines.append(f"- {self._fact_value_markdown(fact)}")
+                lines.extend(self._fact_markdown_lines(fact))
             lines.append("")
         if design_alignment is not None:
             lines.extend(self._design_markdown(design_alignment))
@@ -229,19 +229,20 @@ class TopicRenderer:
         lines = ["## Approved Figma designs", ""]
         for binding in bindings:
             node = nodes[binding.figma_node_id or ""]
-            lines.extend(
-                [
-                    f"### {node.name}",
-                    "",
-                    f"- Frame: [{node.name}]({node.figma_url})",
-                    f"- Figma node: `{node.node_id}`",
-                    "- Snapshot: "
-                    f"`sha256:{design_alignment.snapshot.snapshot_sha256}`",
-                    f"- Requirement: `{binding.annotation_id}`",
-                    f"- Review status: {binding.status}",
-                    "",
-                ]
-            )
+            card = [
+                f"### {node.name}",
+                "",
+                f"- Frame: [{node.name}]({node.figma_url})",
+                f"- Figma node: `{node.node_id}`",
+                "- Snapshot: " f"`sha256:{design_alignment.snapshot.snapshot_sha256}`",
+                f"- Requirement: `{binding.annotation_id}`",
+                f"- Review status: {binding.status}",
+                "",
+            ]
+            if TopicRenderer._contains_hebrew(node.name):
+                lines.extend(["<div dir=\"rtl\">", "", *card, "</div>", ""])
+            else:
+                lines.extend(card)
         return lines
 
     @staticmethod
@@ -249,6 +250,16 @@ class TopicRenderer:
         fact: SemanticAnnotation,
     ) -> str:
         return copilot_fact_value(fact)
+
+    def _fact_markdown_lines(self, fact: SemanticAnnotation) -> list[str]:
+        value = self._fact_value_markdown(fact)
+        if not self._contains_hebrew(value):
+            return [f"- {value}"]
+        return ["<div dir=\"rtl\">", "", f"- {value}", "", "</div>"]
+
+    @staticmethod
+    def _contains_hebrew(value: str) -> bool:
+        return any("\u0590" <= character <= "\u05ff" for character in value)
 
     @staticmethod
     def _context_filename(approved: KnowledgeCandidate) -> str:
