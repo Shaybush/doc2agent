@@ -4,13 +4,13 @@
   <p>Reviewed content blocks: <code>{{ proof.reviewed_block_ids | join(', ') }}</code></p>
   {% if proof.facts %}
     {% for fact in proof.facts %}
-      <article>
-        <h3>{{ fact.kind }}: {{ fact.value }}</h3>
+      <article dir="auto">
+        <h3>{{ fact.kind }}: <bdi>{{ fact.value }}</bdi></h3>
         {% for evidence in fact.evidence %}
           <p><strong>Proof:</strong> {{ evidence.section_path | join(' / ') or 'Preamble' }}, lines {{ evidence.start_line }}–{{ evidence.end_line }} ({{ evidence.support }})</p>
           <details>
             <summary>Open source text</summary>
-            <pre>{{ evidence.source_text }}</pre>
+            <pre dir="auto">{{ evidence.source_text }}</pre>
           </details>
         {% endfor %}
       </article>
@@ -45,36 +45,41 @@
           <p>Snapshot: <code>{{ snapshot.snapshot_sha256 }}</code></p>
           <ul>
             {% for node in snapshot.nodes %}
-              <li>
-                <a href="{{ node.figma_url }}" target="_blank" rel="noopener noreferrer">{{ node.name }}</a> <code>{{ node.node_id }}</code> <span class="hint">{{ node.kind }}</span>
-                <form hx-post="/documents/{{ artifact_id }}/design-alignment" hx-target="#workflow" hx-swap="innerHTML">
-                  <input type="hidden" name="snapshot_sha256" value="{{ snapshot.snapshot_sha256 }}">
-                  <input type="hidden" name="figma_node_id" value="{{ node.node_id }}">
-                  <label>Requirement
-                    <select name="annotation_id" required>
-                      {% for fact in proof.facts %}
-                        <option value="{{ fact.annotation_id }}">{{ fact.kind }}: {{ fact.value }}</option>
-                      {% endfor %}
-                    </select>
-                  </label>
-                  <label>Evidence block
-                    <select name="evidence_block_id" required>
-                      {% for fact in proof.facts %}
-                        {% for evidence in fact.evidence %}
-                          <option value="{{ evidence.block_id }}">{{ fact.value }} — lines {{ evidence.start_line }}–{{ evidence.end_line }}</option>
+              <li dir="auto">
+                <a href="{{ node.figma_url }}" target="_blank" rel="noopener noreferrer"><bdi>{{ node.name }}</bdi></a> <code>{{ node.node_id }}</code> <span class="hint">{{ node.kind }}</span>
+                <details class="mapping-details">
+                  <summary>Create mapping draft</summary>
+                  <form class="mapping-form" hx-post="/documents/{{ artifact_id }}/design-alignment" hx-target="#workflow" hx-swap="innerHTML">
+                    <input type="hidden" name="snapshot_sha256" value="{{ snapshot.snapshot_sha256 }}">
+                    <input type="hidden" name="figma_node_id" value="{{ node.node_id }}">
+                    <label>Requirement
+                      <select name="annotation_id" dir="auto" required>
+                        {% for fact in proof.facts %}
+                          <option value="{{ fact.annotation_id }}">{{ fact.kind }}: {{ fact.value }}</option>
                         {% endfor %}
-                      {% endfor %}
-                    </select>
-                  </label>
-                  <label>Status
-                    <select name="status">
-                      <option value="matches">matches</option>
-                      <option value="partial">partial</option>
-                      <option value="needs_clarification">needs clarification</option>
-                    </select>
-                  </label>
-                  <button type="submit">Save mapping draft</button>
-                </form>
+                      </select>
+                    </label>
+                    <label>Evidence block
+                      <select name="evidence_block_id" dir="auto" required>
+                        {% for fact in proof.facts %}
+                          <optgroup label="{{ fact.kind }}: {{ fact.value }}">
+                            {% for evidence in fact.evidence %}
+                              <option value="{{ evidence.block_id }}">{{ evidence.source_text }}</option>
+                            {% endfor %}
+                          </optgroup>
+                        {% endfor %}
+                      </select>
+                    </label>
+                    <label>Status
+                      <select name="status">
+                        <option value="matches">matches</option>
+                        <option value="partial">partial</option>
+                        <option value="needs_clarification">needs clarification</option>
+                      </select>
+                    </label>
+                    <button type="submit">Save mapping draft</button>
+                  </form>
+                </details>
               </li>
             {% endfor %}
           </ul>

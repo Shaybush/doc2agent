@@ -17,6 +17,12 @@ button, .button { background: #2563eb; border: 0; border-radius: .3rem; color: #
 pre { background: #0f172a; border-radius: .35rem; color: #e2e8f0; max-height: 28rem; overflow: auto; padding: 1rem; white-space: pre-wrap; }
 details { margin: .75rem 0; }
 summary { cursor: pointer; font-weight: 600; }
+.mapping-details { margin: .5rem 0 0; }
+.mapping-form { align-items: stretch; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mapping-form label { display: grid; gap: .3rem; }
+.mapping-form select { min-width: 0; }
+.mapping-form button { justify-self: start; }
+@media (max-width: 640px) { .mapping-form { grid-template-columns: 1fr; } }
 .htmx-indicator { display: none; }
 .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline-flex; }
 .loader { align-items: center; color: #475569; gap: .4rem; }

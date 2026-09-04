@@ -296,6 +296,8 @@ def test_candidate_review_displays_imported_figma_frames() -> None:
     assert "Figma snapshots" in review.text
     assert "אימייל לא תקין" in review.text
     assert "2:15" in review.text
+    assert "Create mapping draft" in review.text
+    assert 'class="mapping-details"' in review.text
 
 
 def test_candidate_review_can_request_a_figma_snapshot() -> None:
