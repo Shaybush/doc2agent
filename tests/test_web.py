@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from doc2agent.application import (
     CandidateProof,
+    DesignAlignmentDraftPreview,
     DocumentProcessingError,
     FigmaImportRequestPreview,
     FigmaNodePreview,
@@ -45,10 +46,12 @@ class StubProcessingService:
             reviewed_block_ids=["block:reviewed"],
             facts=[
                 ProofFact(
+                    annotation_id="fact:explicit-requirement",
                     kind="requirement",
                     value="Explicit requirement",
                     evidence=[
                         ProofEvidence(
+                            block_id="block:reviewed",
                             support="explicit",
                             section_path=["Requirements"],
                             start_line=4,
@@ -91,6 +94,21 @@ class StubProcessingService:
         self, result: ProcessingResult
     ) -> list[FigmaImportRequestPreview]:
         return self.figma_import_requests
+
+    def create_design_alignment_draft(self, *args, **kwargs) -> DesignAlignmentDraftPreview:
+        return DesignAlignmentDraftPreview(
+            alignment_sha256="e" * 64,
+            figma_snapshot_sha256="c" * 64,
+            annotation_id="fact:explicit-requirement",
+            evidence_block_id="block:reviewed",
+            figma_node_id="2:15",
+            status="matches",
+        )
+
+    def list_design_alignment_drafts(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> list[DesignAlignmentDraftPreview]:
+        return []
 
 
 def _result() -> ProcessingResult:
@@ -254,6 +272,67 @@ def test_candidate_review_can_request_a_figma_snapshot() -> None:
     assert response.status_code == 200
     assert "Request Figma snapshot" in response.text
     assert "https://www.figma.com/design/file-key/Registration" in response.text
+
+
+def test_candidate_review_creates_a_figma_mapping_draft() -> None:
+    class MappingProcessingService(StubProcessingService):
+        def __init__(self, result: ProcessingResult | Exception) -> None:
+            super().__init__(result)
+            self.drafts: list[DesignAlignmentDraftPreview] = []
+
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[
+                        FigmaNodePreview(
+                            node_id="2:15",
+                            name="אימייל לא תקין",
+                            kind="FRAME",
+                            figma_url=(
+                                "https://www.figma.com/design/file-key/Registration?node-id=2-15"
+                            ),
+                        )
+                    ],
+                )
+            ]
+
+        def create_design_alignment_draft(self, *args, **kwargs) -> DesignAlignmentDraftPreview:
+            preview = super().create_design_alignment_draft(*args, **kwargs)
+            self.drafts = [preview]
+            return preview
+
+        def list_design_alignment_drafts(
+            self, result: ProcessingResult, proof: CandidateProof
+        ) -> list[DesignAlignmentDraftPreview]:
+            return self.drafts
+
+    client = TestClient(create_app(service=MappingProcessingService(_result())))
+    client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+    client.post(f"/documents/{artifact_id}/candidate")
+
+    response = client.post(
+        f"/documents/{artifact_id}/design-alignment",
+        data={
+            "snapshot_sha256": "c" * 64,
+            "annotation_id": "fact:explicit-requirement",
+            "evidence_block_id": "block:reviewed",
+            "figma_node_id": "2:15",
+            "status": "matches",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Figma mapping drafts" in response.text
+    assert "fact:explicit-requirement" in response.text
 
 
 def test_unsupported_extension_returns_readable_error() -> None:

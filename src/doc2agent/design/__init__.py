@@ -8,6 +8,7 @@ from .alignment import (
     FigmaNode,
     FigmaSnapshot,
 )
+from .alignment_store import DesignAlignmentStore
 from .approval import DesignAlignmentApprovalService
 from .import_request import FigmaImportRequest, FigmaImportRequestStore
 from .snapshot_store import FigmaSnapshotStore
@@ -16,6 +17,7 @@ __all__ = [
     "ApprovedDesignAlignment",
     "DesignAlignmentBuilder",
     "DesignAlignmentCandidate",
+    "DesignAlignmentStore",
     "DesignAlignmentApprovalService",
     "DesignBinding",
     "FigmaImportRequest",

@@ -12,6 +12,7 @@ from doc2agent.design import (
     DesignAlignmentApprovalService,
     DesignAlignmentBuilder,
     DesignAlignmentCandidate,
+    DesignAlignmentStore,
     DesignBinding,
     FigmaImportRequestStore,
     FigmaSnapshot,
@@ -367,18 +368,7 @@ def create_design_alignment(
     except (OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
-    output_path = (
-        storage
-        / "artifacts"
-        / candidate_model.source_id.replace(":", "-")
-        / "design-alignment"
-        / f"{alignment.alignment_sha256}.design-alignment.json"
-    )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        alignment.model_dump_json(indent=2, exclude_none=True),
-        encoding="utf-8",
-    )
+    output_path = DesignAlignmentStore(storage).write(alignment)
     typer.echo(f"Design alignment: {output_path}")
     typer.echo(f"Alignment hash: {alignment.alignment_sha256}")
 

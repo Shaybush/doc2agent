@@ -159,6 +159,28 @@ def create_router() -> APIRouter:
             return _error_response(request, exc.stage, exc.reason)
         return _candidate_response(request, artifact_id, result, proof)
 
+    @router.post("/documents/{artifact_id}/design-alignment")
+    async def create_design_alignment(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.create_design_alignment_draft(
+                result,
+                proof,
+                snapshot_sha256=str(form.get("snapshot_sha256", "")),
+                annotation_id=str(form.get("annotation_id", "")),
+                evidence_block_id=str(form.get("evidence_block_id", "")),
+                figma_node_id=str(form.get("figma_node_id", "")),
+                status=str(form.get("status", "")),
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
     @router.post("/documents/{artifact_id}/approve")
     async def approve_candidate(artifact_id: str, request: Request):
         form = await request.form()
@@ -271,6 +293,7 @@ def _candidate_response(
         service = request.app.state.processing_service
         figma_snapshots = service.list_figma_snapshots(result)
         figma_import_requests = service.list_figma_import_requests(result)
+        design_alignment_drafts = service.list_design_alignment_drafts(result, proof)
     except DocumentProcessingError as exc:
         return _error_response(request, exc.stage, exc.reason)
     return templates.TemplateResponse(
@@ -281,6 +304,7 @@ def _candidate_response(
             "proof": proof,
             "figma_snapshots": figma_snapshots,
             "figma_import_requests": figma_import_requests,
+            "design_alignment_drafts": design_alignment_drafts,
         },
     )
 

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from doc2agent.design import FigmaImportRequestStore, FigmaSnapshotStore
+from doc2agent.design import (
+    DesignAlignmentBuilder,
+    DesignAlignmentStore,
+    DesignBinding,
+    FigmaImportRequestStore,
+    FigmaSnapshotStore,
+)
 from doc2agent.ingest import IngestService
 from doc2agent.pipeline import Doc2AgentPipeline, PipelineStatus
 from doc2agent.security.models import SecurityDecision
@@ -20,6 +26,7 @@ from doc2agent.validator import ValidationReport
 
 from .models import (
     CandidateProof,
+    DesignAlignmentDraftPreview,
     FigmaImportRequestPreview,
     FigmaNodePreview,
     FigmaSnapshotPreview,
@@ -150,10 +157,12 @@ class DocumentProcessingService:
             reviewed_block_ids=list(review.reviewed_block_ids),
             facts=[
                 ProofFact(
+                    annotation_id=f.annotation.id,
                     kind=f.annotation.kind,
                     value=f.annotation.value,
                     evidence=[
                         ProofEvidence(
+                            block_id=e.block_id,
                             support=e.support,
                             section_path=list(e.section_path),
                             start_line=e.start_line,
@@ -256,6 +265,85 @@ class DocumentProcessingService:
             )
             for request in requests
         ]
+
+    def create_design_alignment_draft(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        *,
+        snapshot_sha256: str,
+        annotation_id: str,
+        evidence_block_id: str,
+        figma_node_id: str,
+        status: str,
+    ) -> DesignAlignmentDraftPreview:
+        """Create one explicit, not-yet-approved requirement-to-frame decision."""
+
+        try:
+            candidate = self._candidate_for_proof(result, proof)
+            snapshot = FigmaSnapshotStore(self.storage_root).load(
+                result.source_id, snapshot_sha256
+            )
+            alignment = DesignAlignmentBuilder().build(
+                candidate,
+                snapshot,
+                [
+                    DesignBinding(
+                        annotation_id=annotation_id,
+                        evidence_block_id=evidence_block_id,
+                        figma_node_id=figma_node_id,
+                        status=status,
+                    )
+                ],
+            )
+            DesignAlignmentStore(self.storage_root).write(alignment)
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
+        return self._alignment_preview(alignment)
+
+    def list_design_alignment_drafts(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> list[DesignAlignmentDraftPreview]:
+        try:
+            alignments = DesignAlignmentStore(self.storage_root).list(result.source_id)
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
+        return [
+            self._alignment_preview(alignment)
+            for alignment in alignments
+            if alignment.candidate_sha256 == proof.candidate_sha256
+        ]
+
+    def _candidate_for_proof(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> KnowledgeCandidate:
+        candidate_path = (
+            self.storage_root
+            / "artifacts"
+            / result.source_id.replace(":", "-")
+            / "candidate"
+            / f"{proof.candidate_sha256}.knowledge.json"
+        )
+        candidate = KnowledgeCandidate.model_validate_json(
+            candidate_path.read_text(encoding="utf-8")
+        )
+        if candidate.source_id != result.source_id:
+            raise ValueError("Candidate does not belong to this document revision")
+        return candidate
+
+    @staticmethod
+    def _alignment_preview(alignment) -> DesignAlignmentDraftPreview:
+        binding = alignment.bindings[0]
+        if not binding.annotation_id or not binding.evidence_block_id or not binding.figma_node_id:
+            raise ValueError("Draft alignment is missing a requirement-to-frame binding")
+        return DesignAlignmentDraftPreview(
+            alignment_sha256=alignment.alignment_sha256,
+            figma_snapshot_sha256=alignment.figma_snapshot_sha256,
+            annotation_id=binding.annotation_id,
+            evidence_block_id=binding.evidence_block_id,
+            figma_node_id=binding.figma_node_id,
+            status=binding.status,
+        )
 
     def _artifact_path(self, source_id: str, directory: str, suffix: str) -> Path:
         paths = sorted(

@@ -13,6 +13,7 @@ from doc2agent.analyzer import StructuralAnalyzer
 from doc2agent.design import (
     DesignAlignmentApprovalService,
     DesignAlignmentBuilder,
+    DesignAlignmentStore,
     DesignBinding,
     FigmaImportRequestStore,
     FigmaNode,
@@ -278,6 +279,9 @@ def test_cli_creates_design_alignment_from_explicit_bindings(tmp_path: Path) -> 
         )
     )
     assert len(alignment_paths) == 1
+    assert DesignAlignmentStore(storage).list(candidate.source_id)[0].candidate_sha256 == (
+        candidate.candidate_sha256
+    )
 
 
 def test_cli_approves_alignment_and_renders_figma_context(tmp_path: Path) -> None:

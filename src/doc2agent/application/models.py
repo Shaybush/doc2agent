@@ -22,6 +22,7 @@ class ProcessingResult(BaseModel):
 
 
 class ProofEvidence(BaseModel):
+    block_id: str
     support: str
     section_path: list[str]
     start_line: int
@@ -30,6 +31,7 @@ class ProofEvidence(BaseModel):
 
 
 class ProofFact(BaseModel):
+    annotation_id: str
     kind: str
     value: str
     evidence: list[ProofEvidence]
@@ -61,3 +63,12 @@ class FigmaImportRequestPreview(BaseModel):
     requested_at: str
     status: str
     snapshot_sha256: str | None = None
+
+
+class DesignAlignmentDraftPreview(BaseModel):
+    alignment_sha256: str
+    figma_snapshot_sha256: str
+    annotation_id: str
+    evidence_block_id: str
+    figma_node_id: str
+    status: str
