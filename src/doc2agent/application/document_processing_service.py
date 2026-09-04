@@ -226,7 +226,11 @@ class DocumentProcessingService:
             self._require_current_knowledge(result, candidate)
         except FileNotFoundError:
             return None
-        except (OSError, ValueError) as exc:
+        except ValueError as exc:
+            if str(exc) == "Current approved knowledge belongs to a different candidate":
+                return None
+            raise DocumentProcessingError("Approval", str(exc)) from exc
+        except OSError as exc:
             raise DocumentProcessingError("Approval", str(exc)) from exc
         return KnowledgeApprovalPreview(candidate_sha256=candidate.candidate_sha256)
 

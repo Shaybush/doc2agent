@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -10,6 +11,7 @@ from doc2agent.application import (
     DesignAlignmentBindingPreview,
     DesignAlignmentDraftPreview,
     DocumentProcessingError,
+    DocumentProcessingService,
     FigmaImportRequestPreview,
     FigmaNodePreview,
     FigmaSnapshotPreview,
@@ -289,6 +291,21 @@ def test_candidate_proof_can_be_reviewed_then_approved_and_published() -> None:
     assert published.status_code == 200
     assert "Published Copilot Markdown" in published.text
     assert "Explicit requirement" in published.text
+
+
+def test_new_candidate_is_shown_as_not_yet_approved_not_an_approval_error() -> None:
+    service = DocumentProcessingService(storage_root="unused-for-this-unit-test")
+    proof = StubProcessingService(_result()).generate_candidate(_result())
+
+    with (
+        patch.object(service, "_candidate_for_proof", return_value=object()),
+        patch.object(
+            service,
+            "_require_current_knowledge",
+            side_effect=ValueError("Current approved knowledge belongs to a different candidate"),
+        ),
+    ):
+        assert service.current_knowledge_approval(_result(), proof) is None
 
 
 def test_candidate_review_displays_imported_figma_frames() -> None:
