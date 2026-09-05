@@ -329,6 +329,7 @@ def test_unpublished_copilot_section_uses_a_review_state_not_a_published_heading
     assert "Copilot Markdown not published" in response.text
     assert "Not published yet. Generate a candidate to start the review." in response.text
     assert 'class="candidate-action"' in response.text
+    assert response.text.count('class="artifact-section"') == 3
 
 
 def test_candidate_proof_can_be_reviewed_then_approved_and_published() -> None:
