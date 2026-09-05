@@ -203,7 +203,7 @@ class TopicRenderer:
                 continue
             lines.extend([f"## {COPILOT_CONTEXT_LABELS[kind]}", ""])
             for fact in facts:
-                lines.extend(self._fact_markdown_lines(fact))
+                lines.extend(self.fact_markdown_lines(fact))
             lines.append("")
         if design_alignment is not None:
             lines.extend(self._design_markdown(design_alignment))
@@ -251,9 +251,12 @@ class TopicRenderer:
     ) -> str:
         return copilot_fact_value(fact)
 
-    def _fact_markdown_lines(self, fact: SemanticAnnotation) -> list[str]:
-        value = self._fact_value_markdown(fact)
-        if not self._contains_hebrew(value):
+    @staticmethod
+    def fact_markdown_lines(fact: SemanticAnnotation) -> list[str]:
+        """Return one fact in the canonical Copilot Markdown representation."""
+
+        value = TopicRenderer._fact_value_markdown(fact)
+        if not TopicRenderer._contains_hebrew(value):
             return [f"- {value}"]
         return ["<div dir=\"rtl\">", "", f"- {value}", "", "</div>"]
 

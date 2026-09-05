@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from doc2agent.analyzer import StructuralAnalyzer
 from doc2agent.models.document import AnalyzedDocument, ContentBlock, Section
 from doc2agent.semantic.candidate import KnowledgeCandidate, candidate_contract_report
+from doc2agent.semantic.copilot_context import TopicRenderer
 from doc2agent.semantic.enrichment_patch import (
     EnrichmentPatch,
     EnrichmentPatchValidator,
@@ -21,7 +22,6 @@ from doc2agent.semantic.models import (
     SemanticAnnotation,
     SemanticKind,
     SemanticOrigin,
-    copilot_fact_value,
 )
 from doc2agent.semantic.providers import FixtureSemanticProvider, SemanticProvider
 from doc2agent.semantic.semantic_analyzer import SemanticAnalyzer
@@ -487,6 +487,7 @@ class EnrichmentGoldenRunner:
             if not facts:
                 continue
             lines.extend([f"## {COPILOT_CONTEXT_LABELS[kind]}", ""])
-            lines.extend(f"- {copilot_fact_value(fact)}" for fact in facts)
+            for fact in facts:
+                lines.extend(TopicRenderer.fact_markdown_lines(fact))
             lines.append("")
         return "\n".join(lines)
