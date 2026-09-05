@@ -8,6 +8,7 @@ from doc2agent.design import (
     DesignAlignmentStore,
     DesignBinding,
     FigmaImportRequestStore,
+    FigmaSnapshotReviewStore,
     FigmaSnapshotStore,
 )
 from doc2agent.ingest import IngestService
@@ -316,6 +317,11 @@ class DocumentProcessingService:
 
         try:
             candidate = self._candidate_for_proof(result, proof)
+            excluded = FigmaSnapshotReviewStore(
+                self.storage_root
+            ).excluded_snapshot_hashes(result.source_id)
+            if figma_snapshot_sha256 in excluded:
+                raise ValueError("Figma snapshot is excluded from the current review")
             drafts = [
                 alignment
                 for alignment in DesignAlignmentStore(self.storage_root).list(result.source_id)
@@ -377,6 +383,9 @@ class DocumentProcessingService:
 
         try:
             snapshots = FigmaSnapshotStore(self.storage_root).list(result.source_id)
+            excluded = FigmaSnapshotReviewStore(
+                self.storage_root
+            ).excluded_snapshot_hashes(result.source_id)
         except (OSError, ValueError) as exc:
             raise DocumentProcessingError("Figma", str(exc)) from exc
         return [
@@ -395,7 +404,53 @@ class DocumentProcessingService:
                 ],
             )
             for snapshot in snapshots
+            if snapshot.snapshot_sha256 not in excluded
         ]
+
+    def list_excluded_figma_snapshots(
+        self, result: ProcessingResult
+    ) -> list[FigmaSnapshotPreview]:
+        """Expose excluded snapshots only for an explicit restore action."""
+
+        try:
+            snapshots = FigmaSnapshotStore(self.storage_root).list(result.source_id)
+            excluded = FigmaSnapshotReviewStore(
+                self.storage_root
+            ).excluded_snapshot_hashes(result.source_id)
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
+        return [
+            FigmaSnapshotPreview(
+                snapshot_sha256=snapshot.snapshot_sha256,
+                figma_url=snapshot.figma_url,
+                captured_at=snapshot.captured_at.isoformat(),
+                nodes=[],
+            )
+            for snapshot in snapshots
+            if snapshot.snapshot_sha256 in excluded
+        ]
+
+    def exclude_figma_snapshot(self, result: ProcessingResult, snapshot_sha256: str) -> None:
+        """Remove one snapshot from the active review without deleting it."""
+
+        try:
+            FigmaSnapshotStore(self.storage_root).load(result.source_id, snapshot_sha256)
+            FigmaSnapshotReviewStore(self.storage_root).exclude(
+                result.source_id, snapshot_sha256
+            )
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
+
+    def restore_figma_snapshot(self, result: ProcessingResult, snapshot_sha256: str) -> None:
+        """Return one previously excluded snapshot to the active review."""
+
+        try:
+            FigmaSnapshotStore(self.storage_root).load(result.source_id, snapshot_sha256)
+            FigmaSnapshotReviewStore(self.storage_root).restore(
+                result.source_id, snapshot_sha256
+            )
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
 
     def request_figma_capture(
         self, result: ProcessingResult, figma_url: str
@@ -449,6 +504,11 @@ class DocumentProcessingService:
 
         try:
             candidate = self._candidate_for_proof(result, proof)
+            excluded = FigmaSnapshotReviewStore(
+                self.storage_root
+            ).excluded_snapshot_hashes(result.source_id)
+            if snapshot_sha256 in excluded:
+                raise ValueError("Figma snapshot is excluded from the current review")
             snapshot = FigmaSnapshotStore(self.storage_root).load(
                 result.source_id, snapshot_sha256
             )
@@ -474,12 +534,18 @@ class DocumentProcessingService:
     ) -> list[DesignAlignmentDraftPreview]:
         try:
             alignments = DesignAlignmentStore(self.storage_root).list(result.source_id)
+            excluded = FigmaSnapshotReviewStore(
+                self.storage_root
+            ).excluded_snapshot_hashes(result.source_id)
         except (OSError, ValueError) as exc:
             raise DocumentProcessingError("Figma", str(exc)) from exc
         return [
             self._alignment_preview(alignment)
             for alignment in alignments
-            if alignment.candidate_sha256 == proof.candidate_sha256
+            if (
+                alignment.candidate_sha256 == proof.candidate_sha256
+                and alignment.figma_snapshot_sha256 not in excluded
+            )
         ]
 
     def list_unmapped_figma_nodes(
@@ -489,12 +555,16 @@ class DocumentProcessingService:
 
         try:
             candidate = self._candidate_for_proof(result, proof)
+            excluded = FigmaSnapshotReviewStore(
+                self.storage_root
+            ).excluded_snapshot_hashes(result.source_id)
             drafts = [
                 alignment
                 for alignment in DesignAlignmentStore(self.storage_root).list(result.source_id)
                 if (
                     alignment.candidate_sha256 == candidate.candidate_sha256
                     and len(alignment.bindings) == 1
+                    and alignment.figma_snapshot_sha256 not in excluded
                 )
             ]
             by_snapshot: dict[str, list] = {}

@@ -48,6 +48,10 @@
               <h3>Figma frames in this version</h3>
             </div>
             <a href="{{ snapshot.figma_url }}" target="_blank" rel="noopener noreferrer">Open Figma file</a>
+            <form class="inline-mapping-form" hx-post="/documents/{{ artifact_id }}/exclude-figma-snapshot" hx-target="#workflow" hx-swap="innerHTML">
+              <input type="hidden" name="snapshot_sha256" value="{{ snapshot.snapshot_sha256 }}">
+              <button type="submit">Exclude from current review</button>
+            </form>
           </header>
           <p class="snapshot-id"><span>Version ID</span> <code>{{ snapshot.snapshot_sha256 }}</code></p>
           <p class="hint">Every frame and mapping below belongs only to Snapshot version {{ loop.index }}.</p>
@@ -75,6 +79,20 @@
       {% endfor %}
     {% else %}
       <p class="hint">No Figma snapshot has been imported for this document revision.</p>
+    {% endif %}
+    {% if excluded_figma_snapshots %}
+      <p class="hint">Excluded from current review (kept in history):</p>
+      <ul>
+        {% for snapshot in excluded_figma_snapshots %}
+          <li>
+            <code>{{ snapshot.snapshot_sha256 }}</code>
+            <form class="inline-mapping-form" hx-post="/documents/{{ artifact_id }}/restore-figma-snapshot" hx-target="#workflow" hx-swap="innerHTML">
+              <input type="hidden" name="snapshot_sha256" value="{{ snapshot.snapshot_sha256 }}">
+              <button type="submit">Restore to current review</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
     {% endif %}
   </section>
   {% if design_alignment_drafts %}

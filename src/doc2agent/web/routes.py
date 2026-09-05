@@ -175,6 +175,38 @@ def create_router() -> APIRouter:
             )
         return _candidate_response(request, artifact_id, result, proof)
 
+    @router.post("/documents/{artifact_id}/exclude-figma-snapshot")
+    async def exclude_figma_snapshot(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.exclude_figma_snapshot(
+                result, str(form.get("snapshot_sha256", ""))
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.post("/documents/{artifact_id}/restore-figma-snapshot")
+    async def restore_figma_snapshot(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.restore_figma_snapshot(
+                result, str(form.get("snapshot_sha256", ""))
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
     @router.post("/documents/{artifact_id}/design-alignment")
     async def create_design_alignment(artifact_id: str, request: Request):
         form = await request.form()
@@ -446,6 +478,7 @@ def _candidate_response(
     try:
         service = request.app.state.processing_service
         figma_snapshots = service.list_figma_snapshots(result)
+        excluded_figma_snapshots = service.list_excluded_figma_snapshots(result)
         figma_import_requests = service.list_figma_import_requests(result)
         design_alignment_drafts = service.list_design_alignment_drafts(result, proof)
         unmapped_figma_nodes = service.list_unmapped_figma_nodes(result, proof)
@@ -458,6 +491,7 @@ def _candidate_response(
             "artifact_id": artifact_id,
             "proof": proof,
             "figma_snapshots": figma_snapshots,
+            "excluded_figma_snapshots": excluded_figma_snapshots,
             "figma_import_requests": figma_import_requests,
             "design_alignment_drafts": design_alignment_drafts,
             "figma_mapping_snapshot_hashes": sorted(

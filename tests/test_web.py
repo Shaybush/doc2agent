@@ -138,6 +138,17 @@ class StubProcessingService:
     ) -> list[FigmaSnapshotPreview]:
         return []
 
+    def list_excluded_figma_snapshots(
+        self, result: ProcessingResult
+    ) -> list[FigmaSnapshotPreview]:
+        return []
+
+    def exclude_figma_snapshot(self, result: ProcessingResult, snapshot_sha256: str) -> None:
+        return None
+
+    def restore_figma_snapshot(self, result: ProcessingResult, snapshot_sha256: str) -> None:
+        return None
+
     def request_figma_capture(
         self, result: ProcessingResult, figma_url: str
     ) -> FigmaImportRequestPreview:
@@ -376,6 +387,7 @@ def test_candidate_review_displays_imported_figma_frames() -> None:
     assert "Snapshot version 1" in review.text
     assert "Figma frames in this version" in review.text
     assert 'class="figma-snapshot"' in review.text
+    assert "Exclude from current review" in review.text
     assert "אימייל לא תקין" in review.text
     assert "2:15" in review.text
     assert "Create mapping draft" in review.text

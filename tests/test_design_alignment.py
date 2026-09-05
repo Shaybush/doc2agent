@@ -21,6 +21,7 @@ from doc2agent.design import (
     FigmaMcpCaptureManifest,
     FigmaNode,
     FigmaSnapshot,
+    FigmaSnapshotReviewStore,
     FigmaSnapshotStore,
 )
 from doc2agent.ingest import IngestService
@@ -165,6 +166,23 @@ def test_snapshot_store_is_source_revision_scoped_and_idempotent(tmp_path: Path)
     assert store.load(source_id, snapshot.snapshot_sha256) == snapshot
     with pytest.raises(ValueError, match="Source ID"):
         store.write("source:unknown", snapshot)
+
+
+def test_snapshot_review_exclusions_are_reversible_and_keep_the_snapshot(tmp_path: Path) -> None:
+    snapshot = _snapshot()
+    source_id = "sha256:" + "a" * 64
+    snapshots = FigmaSnapshotStore(tmp_path / "storage")
+    review = FigmaSnapshotReviewStore(tmp_path / "storage")
+    snapshots.write(source_id, snapshot)
+
+    review.exclude(source_id, snapshot.snapshot_sha256)
+
+    assert review.excluded_snapshot_hashes(source_id) == {snapshot.snapshot_sha256}
+    assert snapshots.load(source_id, snapshot.snapshot_sha256) == snapshot
+
+    review.restore(source_id, snapshot.snapshot_sha256)
+
+    assert review.excluded_snapshot_hashes(source_id) == set()
 
 
 def test_figma_import_request_is_source_scoped_and_idempotent(tmp_path: Path) -> None:
