@@ -79,6 +79,13 @@ class DesignAlignmentDraftPreview(BaseModel):
     source_candidate_sha256: str | None = None
 
 
+class FigmaFrameMappingPreview(BaseModel):
+    alignment_sha256: str
+    snapshot_sha256: str
+    figma_node_id: str
+    requirement: str
+
+
 class UnmappedFigmaNodePreview(BaseModel):
     snapshot_sha256: str
     node_id: str

@@ -180,6 +180,12 @@ class StubProcessingService:
             ],
         )
 
+    def list_figma_frame_mappings(self, *args, **kwargs) -> list:
+        return []
+
+    def exclude_figma_mapping(self, *args, **kwargs) -> None:
+        return None
+
     def create_design_alignment_package(
         self,
         result: ProcessingResult,
@@ -535,7 +541,7 @@ def test_candidate_review_creates_a_figma_mapping_draft() -> None:
     )
 
     assert response.status_code == 200
-    assert "Current Figma mappings" in response.text
+    assert "Current Figma mappings" not in response.text
     assert "fact:explicit-requirement" in response.text
 
 
@@ -669,7 +675,7 @@ def test_figma_review_approves_and_saves_markdown_in_one_action() -> None:
     artifact_id = next(iter(client.app.state.processed_artifacts._items))
 
     review = client.post(f"/documents/{artifact_id}/candidate")
-    assert "Current Figma mappings" in review.text
+    assert "Current Figma mappings" not in review.text
     assert "Approve and save Copilot Markdown" in review.text
     assert 'name="figma_snapshot_sha256"' in review.text
     assert "Approval sequence" not in review.text
@@ -755,8 +761,7 @@ def test_candidate_review_can_create_a_same_snapshot_review_package() -> None:
     )
 
     assert response.status_code == 200
-    assert "Current Figma mappings" in response.text
-    assert "2:15" in response.text
+    assert "Current Figma mappings" not in response.text
 
 
 def test_unsupported_extension_returns_readable_error() -> None:

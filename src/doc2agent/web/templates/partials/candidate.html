@@ -72,6 +72,15 @@
                     {% endfor %}
                   </select>
                 </form>
+                {% for mapping in figma_frame_mappings if mapping.snapshot_sha256 == snapshot.snapshot_sha256 and mapping.figma_node_id == node.node_id %}
+                  <div class="frame-mapping" dir="auto">
+                    <span>Mapped:</span> <bdi>{{ mapping.requirement }}</bdi>
+                    <form class="inline-mapping-form" hx-post="/documents/{{ artifact_id }}/exclude-figma-mapping" hx-target="#workflow" hx-swap="innerHTML">
+                      <input type="hidden" name="alignment_sha256" value="{{ mapping.alignment_sha256 }}">
+                      <button type="submit">Remove mapping</button>
+                    </form>
+                  </div>
+                {% endfor %}
               </li>
             {% endfor %}
           </ul>
@@ -95,23 +104,6 @@
       </ul>
     {% endif %}
   </section>
-  {% if design_alignment_drafts %}
-    <section class="figma-review">
-      <h2>Current Figma mappings</h2>
-      <p class="hint">Review these explicit requirement-to-frame decisions. They will be approved together when you save Copilot Markdown.</p>
-      <ul>
-        {% for draft in design_alignment_drafts %}
-          <li>
-            <ul>
-              {% for binding in draft.bindings %}
-                <li><code>{{ binding.annotation_id }}</code> → <code>{{ binding.figma_node_id }}</code> ({{ binding.status }})</li>
-              {% endfor %}
-            </ul>
-          </li>
-        {% endfor %}
-      </ul>
-    </section>
-  {% endif %}
   {% if figma_snapshots or figma_import_requests or design_alignment_drafts %}
     <section class="figma-review">
       <h2>Save Copilot Markdown</h2>

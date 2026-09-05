@@ -5,6 +5,7 @@ from pathlib import Path
 from doc2agent.design import (
     DesignAlignmentApprovalService,
     DesignAlignmentBuilder,
+    DesignAlignmentReviewStore,
     DesignAlignmentStore,
     DesignBinding,
     FigmaImportRequestStore,
@@ -31,6 +32,7 @@ from .models import (
     DesignAlignmentApprovalPreview,
     DesignAlignmentBindingPreview,
     DesignAlignmentDraftPreview,
+    FigmaFrameMappingPreview,
     FigmaImportRequestPreview,
     FigmaNodePreview,
     FigmaSnapshotPreview,
@@ -320,6 +322,9 @@ class DocumentProcessingService:
             excluded = FigmaSnapshotReviewStore(
                 self.storage_root
             ).excluded_snapshot_hashes(result.source_id)
+            excluded_alignments = DesignAlignmentReviewStore(
+                self.storage_root
+            ).excluded_alignment_hashes(result.source_id)
             if figma_snapshot_sha256 in excluded:
                 raise ValueError("Figma snapshot is excluded from the current review")
             drafts = [
@@ -329,6 +334,7 @@ class DocumentProcessingService:
                     alignment.candidate_sha256 == candidate.candidate_sha256
                     and len(alignment.bindings) == 1
                     and alignment.figma_snapshot_sha256 == figma_snapshot_sha256
+                    and alignment.alignment_sha256 not in excluded_alignments
                 )
             ]
             if not drafts:
@@ -534,6 +540,9 @@ class DocumentProcessingService:
     ) -> list[DesignAlignmentDraftPreview]:
         try:
             alignments = DesignAlignmentStore(self.storage_root).list(result.source_id)
+            excluded_alignments = DesignAlignmentReviewStore(
+                self.storage_root
+            ).excluded_alignment_hashes(result.source_id)
             excluded = FigmaSnapshotReviewStore(
                 self.storage_root
             ).excluded_snapshot_hashes(result.source_id)
@@ -545,8 +554,38 @@ class DocumentProcessingService:
             if (
                 alignment.candidate_sha256 == proof.candidate_sha256
                 and alignment.figma_snapshot_sha256 not in excluded
+                and alignment.alignment_sha256 not in excluded_alignments
             )
         ]
+
+    def list_figma_frame_mappings(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> list[FigmaFrameMappingPreview]:
+        facts = {fact.annotation_id: fact for fact in proof.facts}
+        mappings: list[FigmaFrameMappingPreview] = []
+        for draft in self.list_design_alignment_drafts(result, proof):
+            for binding in draft.bindings:
+                fact = facts.get(binding.annotation_id or "")
+                if fact is None or binding.figma_node_id is None:
+                    continue
+                mappings.append(
+                    FigmaFrameMappingPreview(
+                        alignment_sha256=draft.alignment_sha256,
+                        snapshot_sha256=draft.figma_snapshot_sha256,
+                        figma_node_id=binding.figma_node_id,
+                        requirement=f"{fact.kind}: {fact.value}",
+                    )
+                )
+        return mappings
+
+    def exclude_figma_mapping(self, result: ProcessingResult, alignment_sha256: str) -> None:
+        try:
+            DesignAlignmentStore(self.storage_root).load(result.source_id, alignment_sha256)
+            DesignAlignmentReviewStore(self.storage_root).exclude(
+                result.source_id, alignment_sha256
+            )
+        except (OSError, ValueError) as exc:
+            raise DocumentProcessingError("Figma", str(exc)) from exc
 
     def list_unmapped_figma_nodes(
         self, result: ProcessingResult, proof: CandidateProof
@@ -558,6 +597,9 @@ class DocumentProcessingService:
             excluded = FigmaSnapshotReviewStore(
                 self.storage_root
             ).excluded_snapshot_hashes(result.source_id)
+            excluded_alignments = DesignAlignmentReviewStore(
+                self.storage_root
+            ).excluded_alignment_hashes(result.source_id)
             drafts = [
                 alignment
                 for alignment in DesignAlignmentStore(self.storage_root).list(result.source_id)
@@ -565,6 +607,7 @@ class DocumentProcessingService:
                     alignment.candidate_sha256 == candidate.candidate_sha256
                     and len(alignment.bindings) == 1
                     and alignment.figma_snapshot_sha256 not in excluded
+                    and alignment.alignment_sha256 not in excluded_alignments
                 )
             ]
             by_snapshot: dict[str, list] = {}
