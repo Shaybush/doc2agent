@@ -341,6 +341,22 @@ class DocumentProcessingService:
                 raise ValueError(
                     "Choose a Figma snapshot with at least one mapping before saving Markdown"
                 )
+            annotation_ids = [
+                binding.annotation_id
+                for draft in drafts
+                for binding in draft.bindings
+                if binding.annotation_id is not None
+            ]
+            duplicates = sorted(
+                annotation_id
+                for annotation_id in set(annotation_ids)
+                if annotation_ids.count(annotation_id) > 1
+            )
+            if duplicates:
+                raise ValueError(
+                    "Each requirement can map to one frame per Figma snapshot. "
+                    "Remove the duplicate mapping: " + ", ".join(duplicates)
+                )
             snapshot = FigmaSnapshotStore(self.storage_root).load(
                 result.source_id, figma_snapshot_sha256
             )
@@ -513,8 +529,29 @@ class DocumentProcessingService:
             excluded = FigmaSnapshotReviewStore(
                 self.storage_root
             ).excluded_snapshot_hashes(result.source_id)
+            excluded_alignments = DesignAlignmentReviewStore(
+                self.storage_root
+            ).excluded_alignment_hashes(result.source_id)
             if snapshot_sha256 in excluded:
                 raise ValueError("Figma snapshot is excluded from the current review")
+            existing = [
+                alignment
+                for alignment in DesignAlignmentStore(self.storage_root).list(result.source_id)
+                if (
+                    alignment.candidate_sha256 == candidate.candidate_sha256
+                    and alignment.figma_snapshot_sha256 == snapshot_sha256
+                    and alignment.alignment_sha256 not in excluded_alignments
+                    and any(
+                        binding.annotation_id == annotation_id
+                        for binding in alignment.bindings
+                    )
+                )
+            ]
+            if existing:
+                raise ValueError(
+                    "This requirement is already mapped in the selected Figma snapshot. "
+                    "Remove that mapping before choosing another frame."
+                )
             snapshot = FigmaSnapshotStore(self.storage_root).load(
                 result.source_id, snapshot_sha256
             )
@@ -573,6 +610,7 @@ class DocumentProcessingService:
                         alignment_sha256=draft.alignment_sha256,
                         snapshot_sha256=draft.figma_snapshot_sha256,
                         figma_node_id=binding.figma_node_id,
+                        annotation_id=fact.annotation_id,
                         requirement=f"{fact.kind}: {fact.value}",
                     )
                 )

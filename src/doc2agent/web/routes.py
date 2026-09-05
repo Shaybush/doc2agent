@@ -512,6 +512,14 @@ def _candidate_response(
             "figma_import_requests": figma_import_requests,
             "design_alignment_drafts": design_alignment_drafts,
             "figma_frame_mappings": figma_frame_mappings,
+            "figma_mapped_annotation_ids": {
+                snapshot.snapshot_sha256: {
+                    mapping.annotation_id
+                    for mapping in figma_frame_mappings
+                    if mapping.snapshot_sha256 == snapshot.snapshot_sha256
+                }
+                for snapshot in figma_snapshots
+            },
             "figma_mapping_snapshot_hashes": sorted(
                 {draft.figma_snapshot_sha256 for draft in design_alignment_drafts}
             ),

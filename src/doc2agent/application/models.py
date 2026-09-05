@@ -83,6 +83,7 @@ class FigmaFrameMappingPreview(BaseModel):
     alignment_sha256: str
     snapshot_sha256: str
     figma_node_id: str
+    annotation_id: str
     requirement: str
 
 

@@ -65,7 +65,7 @@
                   <input type="hidden" name="status" value="matches">
                   <select name="binding_choice" dir="auto" aria-label="Create mapping draft">
                     <option value="">Create mapping draft</option>
-                    {% for fact in proof.facts %}
+                    {% for fact in proof.facts if fact.annotation_id not in figma_mapped_annotation_ids.get(snapshot.snapshot_sha256, []) %}
                       {% for evidence in fact.evidence %}
                         <option value='{{ [fact.annotation_id, evidence.block_id] | tojson }}'>{{ fact.kind }}: {{ fact.value }}</option>
                       {% endfor %}
