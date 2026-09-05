@@ -228,7 +228,10 @@ def create_router() -> APIRouter:
             return _error_response(request, "Approval", "Generate and review a candidate first.")
         try:
             final_markdown = request.app.state.processing_service.approve_and_publish_with_figma(
-                result, proof, str(form.get("approved_by", ""))
+                result,
+                proof,
+                str(form.get("approved_by", "")),
+                str(form.get("figma_snapshot_sha256", "")),
             )
         except DocumentProcessingError as exc:
             return _error_response(request, exc.stage, exc.reason)
@@ -452,6 +455,9 @@ def _candidate_response(
             "figma_snapshots": figma_snapshots,
             "figma_import_requests": figma_import_requests,
             "design_alignment_drafts": design_alignment_drafts,
+            "figma_mapping_snapshot_hashes": sorted(
+                {draft.figma_snapshot_sha256 for draft in design_alignment_drafts}
+            ),
             "unmapped_figma_nodes": unmapped_figma_nodes,
         },
     )

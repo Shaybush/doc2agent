@@ -90,22 +90,23 @@
   {% if figma_snapshots or figma_import_requests or design_alignment_drafts %}
     <section class="figma-review">
       <h2>Save Copilot Markdown</h2>
-      {% if unmapped_figma_nodes %}
-        <p class="warning">Map every frame in the selected snapshot before saving:</p>
-        <ul>
-          {% for node in unmapped_figma_nodes %}
-            <li><bdi>{{ node.name }}</bdi> <code>{{ node.node_id }}</code></li>
-          {% endfor %}
-        </ul>
-        <button type="button" disabled>Save Copilot Markdown</button>
-      {% elif design_alignment_drafts %}
-        <p class="hint">This one action approves the current knowledge and the mappings above, then saves Copilot Markdown.</p>
+      {% if design_alignment_drafts %}
+        <p class="hint">Choose one Figma snapshot. This action approves its mappings with the current knowledge, then saves Copilot Markdown.</p>
         <form hx-post="/documents/{{ artifact_id }}/approve-and-publish-figma" hx-target="#processing-result" hx-swap="innerHTML" hx-indicator="#approval-loader">
+          <label for="figma_snapshot_sha256">Figma snapshot</label>
+          <select id="figma_snapshot_sha256" name="figma_snapshot_sha256" required>
+            {% for snapshot_sha256 in figma_mapping_snapshot_hashes %}
+              <option value="{{ snapshot_sha256 }}">{{ snapshot_sha256 }}</option>
+            {% endfor %}
+          </select>
           <label for="figma_approved_by">Approver</label>
           <input id="figma_approved_by" name="approved_by" required>
           <button type="submit">Approve and save Copilot Markdown</button>
           <span id="approval-loader" class="loader htmx-indicator" role="status">Saving Copilot Markdown…</span>
         </form>
+      {% elif unmapped_figma_nodes %}
+        <p class="warning">Map every frame in one snapshot before saving Copilot Markdown.</p>
+        <button type="button" disabled>Save Copilot Markdown</button>
       {% else %}
         <p class="hint">Create at least one mapping from this Figma snapshot before saving Copilot Markdown.</p>
         <button type="button" disabled>Save Copilot Markdown</button>

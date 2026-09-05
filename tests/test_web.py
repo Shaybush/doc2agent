@@ -86,9 +86,11 @@ class StubProcessingService:
         result: ProcessingResult,
         proof: CandidateProof,
         approved_by: str,
+        figma_snapshot_sha256: str,
     ) -> str:
         assert approved_by == "reviewer"
         assert proof.candidate_sha256 == "b" * 64
+        assert figma_snapshot_sha256 == "c" * 64
         return "# Approved knowledge with Figma\n\n- Explicit requirement\n"
 
     def approve_knowledge(
@@ -629,11 +631,12 @@ def test_figma_review_approves_and_saves_markdown_in_one_action() -> None:
     review = client.post(f"/documents/{artifact_id}/candidate")
     assert "Current Figma mappings" in review.text
     assert "Approve and save Copilot Markdown" in review.text
+    assert 'name="figma_snapshot_sha256"' in review.text
     assert "Approval sequence" not in review.text
 
     published = client.post(
         f"/documents/{artifact_id}/approve-and-publish-figma",
-        data={"approved_by": "reviewer"},
+        data={"approved_by": "reviewer", "figma_snapshot_sha256": "c" * 64},
     )
     assert published.status_code == 200
     assert "Published Copilot Markdown" in published.text

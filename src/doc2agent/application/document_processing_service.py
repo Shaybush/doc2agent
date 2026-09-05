@@ -306,9 +306,13 @@ class DocumentProcessingService:
             raise DocumentProcessingError("Approval", str(exc)) from exc
 
     def approve_and_publish_with_figma(
-        self, result: ProcessingResult, proof: CandidateProof, approved_by: str
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        approved_by: str,
+        figma_snapshot_sha256: str,
     ) -> str:
-        """Approve one candidate and its current single-node mappings in one MVP action."""
+        """Approve one candidate with mappings from one explicitly selected snapshot."""
 
         try:
             candidate = self._candidate_for_proof(result, proof)
@@ -318,17 +322,15 @@ class DocumentProcessingService:
                 if (
                     alignment.candidate_sha256 == candidate.candidate_sha256
                     and len(alignment.bindings) == 1
+                    and alignment.figma_snapshot_sha256 == figma_snapshot_sha256
                 )
             ]
             if not drafts:
-                raise ValueError("Create at least one Figma mapping before saving Markdown")
-            snapshot_hashes = {draft.figma_snapshot_sha256 for draft in drafts}
-            if len(snapshot_hashes) != 1:
                 raise ValueError(
-                    "Save one Figma snapshot at a time; create mappings from one snapshot."
+                    "Choose a Figma snapshot with at least one mapping before saving Markdown"
                 )
             snapshot = FigmaSnapshotStore(self.storage_root).load(
-                result.source_id, next(iter(snapshot_hashes))
+                result.source_id, figma_snapshot_sha256
             )
             unmapped_node_ids = self._unmapped_node_ids(snapshot, drafts)
             if unmapped_node_ids:
