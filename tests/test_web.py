@@ -304,11 +304,24 @@ def test_published_copilot_markdown_is_available_only_when_present() -> None:
         files={"file": ("example.docx", b"document bytes")},
     )
 
-    assert "Published Copilot Markdown" in response.text
+    assert "Copilot Markdown published" in response.text
     artifact_id = next(iter(client.app.state.processed_artifacts._items))
     published = client.get(f"/documents/{artifact_id}/copilot-markdown")
     assert published.status_code == 200
     assert published.text == "# Approved knowledge\n"
+
+
+def test_unpublished_copilot_section_uses_a_review_state_not_a_published_heading() -> None:
+    client = TestClient(create_app(service=StubProcessingService(_result())))
+
+    response = client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+
+    assert "Copilot Markdown</h3>" in response.text
+    assert "Copilot Markdown not published" in response.text
+    assert "Not published yet. Generate a candidate to start the review." in response.text
 
 
 def test_candidate_proof_can_be_reviewed_then_approved_and_published() -> None:
@@ -331,7 +344,7 @@ def test_candidate_proof_can_be_reviewed_then_approved_and_published() -> None:
         data={"approved_by": "reviewer"},
     )
     assert published.status_code == 200
-    assert "Published Copilot Markdown" in published.text
+    assert "Copilot Markdown published" in published.text
     assert "Explicit requirement" in published.text
 
 
@@ -665,7 +678,7 @@ def test_figma_review_approves_and_saves_markdown_in_one_action() -> None:
         data={"approved_by": "reviewer", "figma_snapshot_sha256": "c" * 64},
     )
     assert published.status_code == 200
-    assert "Published Copilot Markdown" in published.text
+    assert "Copilot Markdown published" in published.text
     assert "Approved knowledge with Figma" in published.text
 
 

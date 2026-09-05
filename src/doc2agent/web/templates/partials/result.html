@@ -6,7 +6,7 @@
     <li>✓ Structure analyzed</li>
     <li>✓ Safe JSON generated</li>
     <li>{% if result.markdown %}✓{% else %}!{% endif %} Normalized Markdown {% if not result.markdown %}is unavailable after security redaction{% endif %}</li>
-    <li>{% if result.published_copilot_markdown %}✓ Published Copilot Markdown{% else %}○ No published Copilot Markdown for this revision{% endif %}</li>
+    <li>{% if result.published_copilot_markdown %}✓ Copilot Markdown published{% else %}○ Copilot Markdown not published{% endif %}</li>
   </ul>
 
   {% if result.validation_errors %}
@@ -31,7 +31,7 @@
   </details>
   <a class="button" href="/documents/{{ artifact_id }}/json">Download JSON</a>
 
-  <h3>Published Copilot Markdown</h3>
+  <h3>Copilot Markdown</h3>
   {% if result.published_copilot_markdown %}
     <details>
       <summary>Open published Copilot Markdown</summary>
@@ -39,7 +39,7 @@
     </details>
     <a class="button" href="/documents/{{ artifact_id }}/copilot-markdown">Download Copilot Markdown</a>
   {% else %}
-    <p class="hint">Generate a candidate, review its proof, then approve it to publish final Markdown.</p>
+    <p class="hint">Not published yet. Generate a candidate to start the review.</p>
   {% endif %}
 
   <section id="workflow">
