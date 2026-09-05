@@ -41,9 +41,16 @@
     {% if figma_snapshots %}
       <p class="hint">Read-only snapshots already imported for this exact document revision.</p>
       {% for snapshot in figma_snapshots %}
-        <article>
-          <p><a href="{{ snapshot.figma_url }}" target="_blank" rel="noopener noreferrer">Open Figma file</a></p>
-          <p>Snapshot: <code>{{ snapshot.snapshot_sha256 }}</code></p>
+        <article class="figma-snapshot">
+          <header class="figma-snapshot-header">
+            <div>
+              <p class="snapshot-label">Snapshot version {{ loop.index }}</p>
+              <h3>Figma frames in this version</h3>
+            </div>
+            <a href="{{ snapshot.figma_url }}" target="_blank" rel="noopener noreferrer">Open Figma file</a>
+          </header>
+          <p class="snapshot-id"><span>Version ID</span> <code>{{ snapshot.snapshot_sha256 }}</code></p>
+          <p class="hint">Every frame and mapping below belongs only to Snapshot version {{ loop.index }}.</p>
           <ul>
             {% for node in snapshot.nodes %}
               <li dir="auto">

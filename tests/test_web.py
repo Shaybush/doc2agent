@@ -373,6 +373,9 @@ def test_candidate_review_displays_imported_figma_frames() -> None:
 
     assert review.status_code == 200
     assert "Figma snapshots" in review.text
+    assert "Snapshot version 1" in review.text
+    assert "Figma frames in this version" in review.text
+    assert 'class="figma-snapshot"' in review.text
     assert "אימייל לא תקין" in review.text
     assert "2:15" in review.text
     assert "Create mapping draft" in review.text
