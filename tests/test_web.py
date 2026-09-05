@@ -441,6 +441,17 @@ def test_candidate_review_can_refresh_figma_status_without_requesting_capture() 
     assert "c" * 64 in response.text
 
 
+def test_refresh_figma_status_explains_when_the_local_review_session_has_reset() -> None:
+    client = TestClient(create_app(service=StubProcessingService(_result())))
+
+    response = client.get("/documents/missing-artifact/figma-status")
+
+    assert response.status_code == 200
+    assert "Stage:</strong> Session" in response.text
+    assert "local review session is no longer active" in response.text
+    assert "Upload the document and generate a candidate again." in response.text
+
+
 def test_candidate_review_creates_a_figma_mapping_draft() -> None:
     class MappingProcessingService(StubProcessingService):
         def __init__(self, result: ProcessingResult | Exception) -> None:

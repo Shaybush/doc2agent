@@ -167,7 +167,12 @@ def create_router() -> APIRouter:
         result = artifacts.get(artifact_id)
         proof = artifacts.candidate(artifact_id)
         if result is None or proof is None:
-            return _error_response(request, "Figma", "Generate and review a candidate first.")
+            return _error_response(
+                request,
+                "Session",
+                "This local review session is no longer active. It may have reset after "
+                "the server restarted. Upload the document and generate a candidate again.",
+            )
         return _candidate_response(request, artifact_id, result, proof)
 
     @router.post("/documents/{artifact_id}/design-alignment")
