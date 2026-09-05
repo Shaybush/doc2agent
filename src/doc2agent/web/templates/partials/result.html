@@ -44,7 +44,7 @@
 
   <section id="workflow">
     {% if not result.published_copilot_markdown %}
-    <form hx-post="/documents/{{ artifact_id }}/candidate" hx-target="#workflow" hx-swap="innerHTML" hx-indicator="#candidate-loader">
+    <form class="candidate-action" hx-post="/documents/{{ artifact_id }}/candidate" hx-target="#workflow" hx-swap="innerHTML" hx-indicator="#candidate-loader">
       <button type="submit">Generate candidate</button>
       <span id="candidate-loader" class="loader htmx-indicator" role="status">Generating candidate…</span>
     </form>
