@@ -132,6 +132,9 @@ def create_router() -> APIRouter:
         result = artifacts.get(artifact_id)
         if result is None:
             return _error_response(request, "Candidate", "Processing result was not found.")
+        cached_proof = artifacts.candidate(artifact_id)
+        if cached_proof is not None:
+            return _candidate_response(request, artifact_id, result, cached_proof)
         try:
             proof = request.app.state.processing_service.generate_candidate(result)
         except DocumentProcessingError as exc:

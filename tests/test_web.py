@@ -33,6 +33,7 @@ class StubProcessingService:
         self.figma_import_requests: list[FigmaImportRequestPreview] = []
         self.knowledge_approval: KnowledgeApprovalPreview | None = None
         self.design_alignment_approval: DesignAlignmentApprovalPreview | None = None
+        self.candidate_generations = 0
 
     def process(
         self,
@@ -49,6 +50,7 @@ class StubProcessingService:
         return self.result
 
     def generate_candidate(self, result: ProcessingResult) -> CandidateProof:
+        self.candidate_generations += 1
         return CandidateProof(
             candidate_sha256="b" * 64,
             reviewed_block_ids=["block:reviewed"],
@@ -334,11 +336,11 @@ def test_unpublished_copilot_section_uses_a_review_state_not_a_published_heading
 
 def test_candidate_proof_can_be_reviewed_then_approved_and_published() -> None:
     client = TestClient(create_app(service=StubProcessingService(_result())))
-    processed = client.post(
+    response = client.post(
         "/documents/process",
         files={"file": ("example.docx", b"document bytes")},
     )
-    assert processed.status_code == 200
+    assert response.status_code == 200
     artifact_id = next(iter(client.app.state.processed_artifacts._items))
 
     review = client.post(f"/documents/{artifact_id}/candidate")
@@ -354,6 +356,25 @@ def test_candidate_proof_can_be_reviewed_then_approved_and_published() -> None:
     assert published.status_code == 200
     assert "Copilot Markdown published" in published.text
     assert "Explicit requirement" in published.text
+
+
+def test_repeated_candidate_request_reuses_the_current_review_without_regeneration() -> None:
+    service = StubProcessingService(_result())
+    client = TestClient(create_app(service=service))
+    response = client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    assert response.status_code == 200
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+
+    first_review = client.post(f"/documents/{artifact_id}/candidate")
+    repeated_review = client.post(f"/documents/{artifact_id}/candidate")
+
+    assert first_review.status_code == 200
+    assert repeated_review.status_code == 200
+    assert "Candidate review / proof" in repeated_review.text
+    assert service.candidate_generations == 1
 
 
 def test_new_candidate_is_shown_as_not_yet_approved_not_an_approval_error() -> None:
