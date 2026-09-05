@@ -22,6 +22,7 @@ class ProcessingResult(BaseModel):
 
 
 class ProofEvidence(BaseModel):
+    block_id: str
     support: str
     section_path: list[str]
     start_line: int
@@ -30,6 +31,7 @@ class ProofEvidence(BaseModel):
 
 
 class ProofFact(BaseModel):
+    annotation_id: str
     kind: str
     value: str
     evidence: list[ProofEvidence]
@@ -39,3 +41,62 @@ class CandidateProof(BaseModel):
     candidate_sha256: str
     reviewed_block_ids: list[str]
     facts: list[ProofFact]
+
+
+class FigmaNodePreview(BaseModel):
+    node_id: str
+    name: str
+    kind: str
+    figma_url: str
+
+
+class FigmaSnapshotPreview(BaseModel):
+    snapshot_sha256: str
+    figma_url: str
+    captured_at: str
+    nodes: list[FigmaNodePreview]
+
+
+class FigmaImportRequestPreview(BaseModel):
+    request_sha256: str
+    figma_url: str
+    requested_at: str
+    status: str
+    snapshot_sha256: str | None = None
+
+
+class DesignAlignmentBindingPreview(BaseModel):
+    annotation_id: str | None = None
+    evidence_block_id: str | None = None
+    figma_node_id: str | None = None
+    status: str
+
+
+class DesignAlignmentDraftPreview(BaseModel):
+    alignment_sha256: str
+    figma_snapshot_sha256: str
+    bindings: list[DesignAlignmentBindingPreview]
+    source_candidate_sha256: str | None = None
+
+
+class FigmaFrameMappingPreview(BaseModel):
+    alignment_sha256: str
+    snapshot_sha256: str
+    figma_node_id: str
+    annotation_id: str
+    requirement: str
+
+
+class UnmappedFigmaNodePreview(BaseModel):
+    snapshot_sha256: str
+    node_id: str
+    name: str
+
+
+class KnowledgeApprovalPreview(BaseModel):
+    candidate_sha256: str
+
+
+class DesignAlignmentApprovalPreview(BaseModel):
+    alignment_sha256: str
+    figma_snapshot_sha256: str

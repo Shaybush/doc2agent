@@ -82,6 +82,7 @@ def test_hebrew_v2_golden_evaluation_passes_patch_candidate_and_markdown(
     assert patch_report.passed is True
     assert patch_report.required_fact_count == 12
     assert patch_report.matched_required_fact_ids == [fact.id for fact in patch.facts]
+    assert '<div dir="rtl">' in markdown
     assert candidate_report.passed is True
     assert candidate_report.markdown_mismatch_codes == []
 

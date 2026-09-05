@@ -4,13 +4,13 @@
   <p>Reviewed content blocks: <code>{{ proof.reviewed_block_ids | join(', ') }}</code></p>
   {% if proof.facts %}
     {% for fact in proof.facts %}
-      <article>
-        <h3>{{ fact.kind }}: {{ fact.value }}</h3>
+      <article dir="auto">
+        <h3>{{ fact.kind }}: <bdi>{{ fact.value }}</bdi></h3>
         {% for evidence in fact.evidence %}
           <p><strong>Proof:</strong> {{ evidence.section_path | join(' / ') or 'Preamble' }}, lines {{ evidence.start_line }}–{{ evidence.end_line }} ({{ evidence.support }})</p>
           <details>
             <summary>Open source text</summary>
-            <pre>{{ evidence.source_text }}</pre>
+            <pre dir="auto">{{ evidence.source_text }}</pre>
           </details>
         {% endfor %}
       </article>
@@ -18,10 +18,123 @@
   {% else %}
     <p class="hint">The provider found no explicitly supported facts.</p>
   {% endif %}
-  <form hx-post="/documents/{{ artifact_id }}/approve" hx-target="#processing-result" hx-swap="innerHTML" hx-indicator="#approval-loader">
-    <label for="approved_by">Approver</label>
-    <input id="approved_by" name="approved_by" required>
-    <button type="submit">Approve and publish Copilot Markdown</button>
-    <span id="approval-loader" class="loader htmx-indicator" role="status">Publishing Copilot Markdown…</span>
-  </form>
+  <section class="figma-review">
+    <h2>Add Figma design</h2>
+    <p class="hint">The URL is recorded for this document revision. A configured MCP capture fulfils it separately; the browser does not fetch Figma.</p>
+    <form hx-post="/documents/{{ artifact_id }}/figma-import-request" hx-target="#workflow" hx-swap="innerHTML">
+      <label for="figma_url">Figma URL</label>
+      <input id="figma_url" name="figma_url" type="url" placeholder="https://www.figma.com/design/..." required>
+      <button type="submit">Request Figma snapshot</button>
+    </form>
+    {% if figma_import_requests %}
+      <button type="button" hx-get="/documents/{{ artifact_id }}/figma-status" hx-target="#workflow" hx-swap="innerHTML">Refresh Figma status</button>
+      <p class="hint">Pending capture requests for this document revision:</p>
+      <ul>
+        {% for import_request in figma_import_requests %}
+          <li><a href="{{ import_request.figma_url }}" target="_blank" rel="noopener noreferrer">{{ import_request.figma_url }}</a> <code>{{ import_request.request_sha256 }}</code> — {{ import_request.status }}{% if import_request.snapshot_sha256 %} <code>{{ import_request.snapshot_sha256 }}</code>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+  <section class="figma-review">
+    <h2>Figma snapshots</h2>
+    {% if figma_snapshots %}
+      <p class="hint">Read-only snapshots already imported for this exact document revision.</p>
+      {% for snapshot in figma_snapshots %}
+        <article class="figma-snapshot">
+          <header class="figma-snapshot-header">
+            <div>
+              <p class="snapshot-label">Snapshot version {{ loop.index }}</p>
+              <h3>Figma frames in this version</h3>
+            </div>
+            <a href="{{ snapshot.figma_url }}" target="_blank" rel="noopener noreferrer">Open Figma file</a>
+            <form class="inline-mapping-form" hx-post="/documents/{{ artifact_id }}/exclude-figma-snapshot" hx-target="#workflow" hx-swap="innerHTML">
+              <input type="hidden" name="snapshot_sha256" value="{{ snapshot.snapshot_sha256 }}">
+              <button type="submit">Exclude from current review</button>
+            </form>
+          </header>
+          <p class="snapshot-id"><span>Version ID</span> <code>{{ snapshot.snapshot_sha256 }}</code></p>
+          <p class="hint">Every frame and mapping below belongs only to Snapshot version {{ loop.index }}.</p>
+          <ul>
+            {% for node in snapshot.nodes %}
+              <li dir="auto">
+                <a href="{{ node.figma_url }}" target="_blank" rel="noopener noreferrer"><bdi>{{ node.name }}</bdi></a> <code>{{ node.node_id }}</code> <span class="hint">{{ node.kind }}</span>
+                <form class="inline-mapping-form" hx-post="/documents/{{ artifact_id }}/design-alignment" hx-target="#workflow" hx-swap="innerHTML" hx-trigger="change">
+                  <input type="hidden" name="snapshot_sha256" value="{{ snapshot.snapshot_sha256 }}">
+                  <input type="hidden" name="figma_node_id" value="{{ node.node_id }}">
+                  <input type="hidden" name="status" value="matches">
+                  <select name="binding_choice" dir="auto" aria-label="Create mapping draft">
+                    <option value="">Create mapping draft</option>
+                    {% for fact in proof.facts if fact.annotation_id not in figma_mapped_annotation_ids.get(snapshot.snapshot_sha256, []) %}
+                      {% for evidence in fact.evidence %}
+                        <option value='{{ [fact.annotation_id, evidence.block_id] | tojson }}'>{{ fact.kind }}: {{ fact.value }}</option>
+                      {% endfor %}
+                    {% endfor %}
+                  </select>
+                </form>
+                {% for mapping in figma_frame_mappings if mapping.snapshot_sha256 == snapshot.snapshot_sha256 and mapping.figma_node_id == node.node_id %}
+                  <div class="frame-mapping" dir="auto">
+                    <span>Mapped:</span> <bdi>{{ mapping.requirement }}</bdi>
+                    <form class="inline-mapping-form" hx-post="/documents/{{ artifact_id }}/exclude-figma-mapping" hx-target="#workflow" hx-swap="innerHTML">
+                      <input type="hidden" name="alignment_sha256" value="{{ mapping.alignment_sha256 }}">
+                      <button type="submit">Remove mapping</button>
+                    </form>
+                  </div>
+                {% endfor %}
+              </li>
+            {% endfor %}
+          </ul>
+        </article>
+      {% endfor %}
+    {% else %}
+      <p class="hint">No Figma snapshot has been imported for this document revision.</p>
+    {% endif %}
+    {% if excluded_figma_snapshots %}
+      <p class="hint">Excluded from current review (kept in history):</p>
+      <ul>
+        {% for snapshot in excluded_figma_snapshots %}
+          <li>
+            <code>{{ snapshot.snapshot_sha256 }}</code>
+            <form class="inline-mapping-form" hx-post="/documents/{{ artifact_id }}/restore-figma-snapshot" hx-target="#workflow" hx-swap="innerHTML">
+              <input type="hidden" name="snapshot_sha256" value="{{ snapshot.snapshot_sha256 }}">
+              <button type="submit">Restore to current review</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+  {% if figma_snapshots or figma_import_requests or design_alignment_drafts %}
+    <section class="figma-review">
+      <h2>Save Copilot Markdown</h2>
+      {% if design_alignment_drafts %}
+        <p class="hint">Choose one Figma snapshot. This action approves its mappings with the current knowledge, then saves Copilot Markdown.</p>
+        <form hx-post="/documents/{{ artifact_id }}/approve-and-publish-figma" hx-target="#processing-result" hx-swap="innerHTML" hx-indicator="#approval-loader">
+          <label for="figma_snapshot_sha256">Figma snapshot</label>
+          <select id="figma_snapshot_sha256" name="figma_snapshot_sha256" required>
+            {% for snapshot_sha256 in figma_mapping_snapshot_hashes %}
+              <option value="{{ snapshot_sha256 }}">{{ snapshot_sha256 }}</option>
+            {% endfor %}
+          </select>
+          <label for="figma_approved_by">Approver</label>
+          <input id="figma_approved_by" name="approved_by" required>
+          <button type="submit">Approve and save Copilot Markdown</button>
+          <span id="approval-loader" class="loader htmx-indicator" role="status">Saving Copilot Markdown…</span>
+        </form>
+      {% elif unmapped_figma_nodes %}
+        <p class="warning">Map every frame in one snapshot before saving Copilot Markdown.</p>
+        <button type="button" disabled>Save Copilot Markdown</button>
+      {% else %}
+        <p class="hint">Create at least one mapping from this Figma snapshot before saving Copilot Markdown.</p>
+        <button type="button" disabled>Save Copilot Markdown</button>
+      {% endif %}
+    </section>
+  {% else %}
+    <form hx-post="/documents/{{ artifact_id }}/approve" hx-target="#processing-result" hx-swap="innerHTML" hx-indicator="#approval-loader">
+      <label for="approved_by">Approver</label>
+      <input id="approved_by" name="approved_by" required>
+      <button type="submit">Approve and publish Copilot Markdown</button>
+      <span id="approval-loader" class="loader htmx-indicator" role="status">Publishing Copilot Markdown…</span>
+    </form>
+  {% endif %}
 </section>

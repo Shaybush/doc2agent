@@ -8,8 +8,12 @@ body { margin: 0; }
 main { max-width: 960px; margin: 3rem auto; padding: 0 1rem; }
 form, .result { background: #fff; border: 1px solid #dbe3ee; border-radius: .5rem; padding: 1rem; }
 form { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.candidate-action { background: transparent; border: 0; padding: 0; }
 button, .button { background: #2563eb; border: 0; border-radius: .3rem; color: #fff; cursor: pointer; padding: .55rem .8rem; text-decoration: none; }
+button:disabled { background: #94a3b8; cursor: not-allowed; }
 .result { margin-top: 1.5rem; }
+.artifact-section { border: 1px solid #dbe3ee; border-radius: .5rem; margin-top: 1rem; padding: 1rem; }
+.artifact-section h3 { margin-top: 0; }
 .status { color: #166534; font-weight: 700; text-transform: uppercase; }
 .error { border-color: #ef4444; }
 .warning { color: #92400e; }
@@ -17,6 +21,30 @@ button, .button { background: #2563eb; border: 0; border-radius: .3rem; color: #
 pre { background: #0f172a; border-radius: .35rem; color: #e2e8f0; max-height: 28rem; overflow: auto; padding: 1rem; white-space: pre-wrap; }
 details { margin: .75rem 0; }
 summary { cursor: pointer; font-weight: 600; }
+.mapping-details { margin: .5rem 0 0; }
+.figma-snapshot { border: 2px solid #bfdbfe; border-radius: .5rem; margin: 1rem 0; padding: 1rem; }
+.figma-snapshot-header { align-items: center; display: flex; gap: 1rem; justify-content: space-between; }
+.figma-snapshot-header h3, .snapshot-label, .snapshot-id { margin: 0; }
+.snapshot-label { color: #1d4ed8; font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.snapshot-id { background: #eff6ff; border-radius: .3rem; margin-top: .75rem; overflow-wrap: anywhere; padding: .5rem; }
+.snapshot-id span { color: #475569; font-weight: 600; }
+.inline-mapping-form { background: transparent; border: 0; display: inline-flex; margin: .5rem 0 0; padding: 0; }
+.inline-mapping-form select { max-width: 100%; }
+.frame-mapping { background: #ecfdf5; border-radius: .3rem; margin: .5rem 0 0; padding: .45rem .6rem; }
+.frame-mapping > span { color: #166534; font-weight: 700; }
+.mapping-form { align-items: stretch; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mapping-form label { display: grid; gap: .3rem; }
+.mapping-form select { min-width: 0; }
+.mapping-form button { justify-self: start; }
+.binding-choice { border: 1px solid #dbe3ee; border-radius: .3rem; display: grid; gap: .5rem; grid-column: 1 / -1; }
+.binding-choice label { align-items: start; grid-template-columns: auto 1fr; }
+.binding-choice small { color: #64748b; }
+.mapping-package-form { align-items: stretch; display: block; }
+.mapping-package-form ul { display: grid; gap: .75rem; padding-left: 1.5rem; }
+@media (max-width: 640px) {
+  .mapping-form { grid-template-columns: 1fr; }
+  .figma-snapshot-header { align-items: start; flex-direction: column; gap: .5rem; }
+}
 .htmx-indicator { display: none; }
 .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline-flex; }
 .loader { align-items: center; color: #475569; gap: .4rem; }

@@ -6,48 +6,54 @@
     <li>✓ Structure analyzed</li>
     <li>✓ Safe JSON generated</li>
     <li>{% if result.markdown %}✓{% else %}!{% endif %} Normalized Markdown {% if not result.markdown %}is unavailable after security redaction{% endif %}</li>
-    <li>{% if result.published_copilot_markdown %}✓ Published Copilot Markdown{% else %}○ No published Copilot Markdown for this revision{% endif %}</li>
+    <li>{% if result.published_copilot_markdown %}✓ Copilot Markdown published{% else %}○ Copilot Markdown not published{% endif %}</li>
   </ul>
 
   {% if result.validation_errors %}
     <p class="warning">Validation issues: {{ result.validation_errors | join('; ') }}</p>
   {% endif %}
 
-  <h3>Normalized Markdown</h3>
-  {% if result.markdown %}
-    <details>
-      <summary>Open normalized Markdown</summary>
-      <pre>{{ result.markdown }}</pre>
-    </details>
-    <a class="button" href="/documents/{{ artifact_id }}/markdown">Download Markdown</a>
-  {% else %}
-    <p class="warning">The structured JSON below is sanitized; a matching safe Markdown artifact is not available.</p>
-  {% endif %}
-
-  <h3>JSON</h3>
-  <details>
-    <summary>Open structured JSON</summary>
-    <pre>{{ result.document_json | tojson(indent=2) }}</pre>
-  </details>
-  <a class="button" href="/documents/{{ artifact_id }}/json">Download JSON</a>
-
-  <h3>Published Copilot Markdown</h3>
-  {% if result.published_copilot_markdown %}
-    <details>
-      <summary>Open published Copilot Markdown</summary>
-      <pre>{{ result.published_copilot_markdown }}</pre>
-    </details>
-    <a class="button" href="/documents/{{ artifact_id }}/copilot-markdown">Download Copilot Markdown</a>
-  {% else %}
-    <p class="hint">Generate a candidate, review its proof, then approve it to publish final Markdown.</p>
-  {% endif %}
-
-  <section id="workflow">
-    {% if not result.published_copilot_markdown %}
-    <form hx-post="/documents/{{ artifact_id }}/candidate" hx-target="#workflow" hx-swap="innerHTML" hx-indicator="#candidate-loader">
-      <button type="submit">Generate candidate</button>
-      <span id="candidate-loader" class="loader htmx-indicator" role="status">Generating candidate…</span>
-    </form>
+  <section class="artifact-section">
+    <h3>Normalized Markdown</h3>
+    {% if result.markdown %}
+      <details>
+        <summary>Open normalized Markdown</summary>
+        <pre>{{ result.markdown }}</pre>
+      </details>
+      <a class="button" href="/documents/{{ artifact_id }}/markdown">Download Markdown</a>
+    {% else %}
+      <p class="warning">The structured JSON below is sanitized; a matching safe Markdown artifact is not available.</p>
     {% endif %}
+  </section>
+
+  <section class="artifact-section">
+    <h3>JSON</h3>
+    <details>
+      <summary>Open structured JSON</summary>
+      <pre>{{ result.document_json | tojson(indent=2) }}</pre>
+    </details>
+    <a class="button" href="/documents/{{ artifact_id }}/json">Download JSON</a>
+  </section>
+
+  <section class="artifact-section">
+    <h3>Copilot Markdown</h3>
+    {% if result.published_copilot_markdown %}
+      <details>
+        <summary>Open published Copilot Markdown</summary>
+        <pre>{{ result.published_copilot_markdown }}</pre>
+      </details>
+      <a class="button" href="/documents/{{ artifact_id }}/copilot-markdown">Download Copilot Markdown</a>
+    {% else %}
+      <p class="hint">Not published yet. Generate a candidate to start the review.</p>
+    {% endif %}
+
+    <section id="workflow">
+      {% if not result.published_copilot_markdown %}
+      <form class="candidate-action" hx-post="/documents/{{ artifact_id }}/candidate" hx-target="#workflow" hx-swap="innerHTML" hx-indicator="#candidate-loader">
+        <button type="submit">Generate candidate</button>
+        <span id="candidate-loader" class="loader htmx-indicator" role="status">Generating candidate…</span>
+      </form>
+      {% endif %}
+    </section>
   </section>
 </section>

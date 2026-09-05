@@ -11,6 +11,7 @@ from doc2agent.semantic.semantic_analyzer import SemanticAnalyzer
 
 @dataclass(frozen=True)
 class ReviewedEvidence:
+    block_id: str
     support: str
     section_path: tuple[str, ...]
     start_line: int
@@ -44,6 +45,7 @@ class CandidateReviewer:
                 annotation=annotation,
                 evidence=tuple(
                     ReviewedEvidence(
+                        block_id=evidence.block_id,
                         support=evidence.support,
                         section_path=blocks[evidence.block_id][0],
                         start_line=blocks[evidence.block_id][1].start_line,

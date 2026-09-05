@@ -132,6 +132,7 @@ def test_renderer_isolates_rtl_fact_values_from_ltr_markdown(tmp_path: Path) -> 
 
     markdown = result.context_path.read_text(encoding="utf-8")
     assert "אין צורך ב-LLM בשלב הניתוח המבני." in markdown
+    assert '<div dir="rtl">' in markdown
     assert "\u2067" not in markdown
     assert "<bdi" not in markdown
 

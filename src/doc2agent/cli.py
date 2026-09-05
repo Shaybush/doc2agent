@@ -1,11 +1,25 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import typer
+from pydantic import TypeAdapter
 
 from doc2agent.analyzer import StructuralAnalyzer
 from doc2agent.converter import Converter
+from doc2agent.design import (
+    ApprovedDesignAlignment,
+    DesignAlignmentApprovalService,
+    DesignAlignmentBuilder,
+    DesignAlignmentCandidate,
+    DesignAlignmentStore,
+    DesignBinding,
+    FigmaImportRequestStore,
+    FigmaMcpCaptureManifest,
+    FigmaSnapshot,
+    FigmaSnapshotStore,
+)
 from doc2agent.ingest import IngestService
 from doc2agent.models.document import AnalyzedDocument
 from doc2agent.pipeline import Doc2AgentPipeline
@@ -283,6 +297,168 @@ def review_candidate(
     typer.echo(CandidateReviewer.render(review))
 
 
+@app.command("import-figma-snapshot")
+def import_figma_snapshot(
+    snapshot: Path = typer.Argument(..., exists=True, dir_okay=False),
+    source_id: str = typer.Option(..., "--source-id"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+) -> None:
+    """Validate and store one read-only Figma snapshot for a source revision."""
+
+    if IngestService(storage).document_id_for_source(source_id) is None:
+        raise typer.BadParameter("Figma snapshot source is not registered")
+    try:
+        snapshot_model = FigmaSnapshot.model_validate_json(snapshot.read_text(encoding="utf-8"))
+        output_path = FigmaSnapshotStore(storage).write(source_id, snapshot_model)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Figma snapshot: {output_path}")
+    typer.echo(f"Snapshot hash: {snapshot_model.snapshot_sha256}")
+
+
+@app.command("complete-figma-import-request")
+def complete_figma_import_request(
+    snapshot: Path = typer.Argument(..., exists=True, dir_okay=False),
+    source_id: str = typer.Option(..., "--source-id"),
+    request_sha256: str = typer.Option(..., "--request-sha256"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+) -> None:
+    """Store an MCP-captured snapshot and fulfil its explicit Figma URL request."""
+
+    if IngestService(storage).document_id_for_source(source_id) is None:
+        raise typer.BadParameter("Figma snapshot source is not registered")
+    try:
+        snapshot_model = FigmaSnapshot.model_validate_json(snapshot.read_text(encoding="utf-8"))
+        requests = FigmaImportRequestStore(storage)
+        requests.assert_can_fulfill(source_id, request_sha256, snapshot_model)
+        output_path = FigmaSnapshotStore(storage).write(source_id, snapshot_model)
+        completed = requests.fulfill(source_id, request_sha256, snapshot_model)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Figma snapshot: {output_path}")
+    typer.echo(f"Snapshot hash: {snapshot_model.snapshot_sha256}")
+    typer.echo(f"Figma import request: {completed.request_sha256} ({completed.status})")
+
+
+@app.command("capture-figma-import-request")
+def capture_figma_import_request(
+    capture: Path = typer.Argument(..., exists=True, dir_okay=False),
+    source_id: str = typer.Option(..., "--source-id"),
+    request_sha256: str = typer.Option(..., "--request-sha256"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+) -> None:
+    """Normalize a multi-node Figma MCP capture and fulfil one import request."""
+
+    if IngestService(storage).document_id_for_source(source_id) is None:
+        raise typer.BadParameter("Figma snapshot source is not registered")
+    try:
+        manifest = FigmaMcpCaptureManifest.model_validate_json(
+            capture.read_text(encoding="utf-8")
+        )
+        snapshot = manifest.build_snapshot()
+        requests = FigmaImportRequestStore(storage)
+        requests.assert_can_fulfill(source_id, request_sha256, snapshot)
+        output_path = FigmaSnapshotStore(storage).write(source_id, snapshot)
+        completed = requests.fulfill(source_id, request_sha256, snapshot)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Figma snapshot: {output_path}")
+    typer.echo(f"Snapshot hash: {snapshot.snapshot_sha256}")
+    typer.echo(f"Figma import request: {completed.request_sha256} ({completed.status})")
+
+
+@app.command("list-pending-figma-import-requests")
+def list_pending_figma_import_requests(
+    source_id: str | None = typer.Option(None, "--source-id"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+) -> None:
+    """Emit pending Figma capture work for a separately configured MCP worker."""
+
+    try:
+        pending = FigmaImportRequestStore(storage).list_pending(source_id)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(
+        json.dumps(
+            [request.model_dump(mode="json") for request in pending],
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+@app.command("create-design-alignment")
+def create_design_alignment(
+    bindings: Path = typer.Argument(..., exists=True, dir_okay=False),
+    candidate: Path = typer.Option(..., "--candidate", exists=True, dir_okay=False),
+    snapshot_sha256: str = typer.Option(..., "--snapshot-sha256"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+) -> None:
+    """Create a reviewable requirement-to-Figma mapping from explicit decisions."""
+
+    try:
+        candidate_model = KnowledgeCandidate.model_validate_json(
+            candidate.read_text(encoding="utf-8")
+        )
+        if IngestService(storage).document_id_for_source(candidate_model.source_id) is None:
+            raise ValueError("Design alignment source is not registered")
+        snapshot = FigmaSnapshotStore(storage).load(
+            candidate_model.source_id,
+            snapshot_sha256,
+        )
+        bindings_model = TypeAdapter(list[DesignBinding]).validate_json(
+            bindings.read_text(encoding="utf-8")
+        )
+        alignment = DesignAlignmentBuilder().build(
+            candidate_model,
+            snapshot,
+            bindings_model,
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    output_path = DesignAlignmentStore(storage).write(alignment)
+    typer.echo(f"Design alignment: {output_path}")
+    typer.echo(f"Alignment hash: {alignment.alignment_sha256}")
+
+
+@app.command("approve-design-alignment")
+def approve_design_alignment(
+    alignment: Path = typer.Argument(..., exists=True, dir_okay=False),
+    approved: Path = typer.Option(..., "--approved", exists=True, dir_okay=False),
+    approved_by: str = typer.Option(..., "--by"),
+    storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
+    document_id: str | None = typer.Option(None, "--document-id"),
+) -> None:
+    """Approve one mapping against an already approved knowledge snapshot."""
+
+    try:
+        knowledge = KnowledgeCandidate.model_validate_json(approved.read_text(encoding="utf-8"))
+        resolved_document_id = IngestService(storage).document_id_for_source(knowledge.source_id)
+        if resolved_document_id is None:
+            raise ValueError("Approved knowledge source is not registered")
+        if document_id is not None and document_id != resolved_document_id:
+            raise ValueError("--document-id does not match the approved knowledge")
+        alignment_model = DesignAlignmentCandidate.model_validate_json(
+            alignment.read_text(encoding="utf-8")
+        )
+        snapshot = FigmaSnapshotStore(storage).load(
+            knowledge.source_id,
+            alignment_model.figma_snapshot_sha256,
+        )
+        output_path = DesignAlignmentApprovalService(storage).approve(
+            alignment_model,
+            knowledge,
+            snapshot,
+            document_id=resolved_document_id,
+            approved_by=approved_by,
+            knowledge_path=approved,
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Approved design alignment: {output_path}")
+
+
 @app.command("render-copilot")
 def render_copilot(
     approved: Path | None = typer.Option(
@@ -293,6 +469,11 @@ def render_copilot(
     storage: Path = typer.Option(Path("storage"), "--storage", "-s"),
     document_id: str | None = typer.Option(None, "--document-id"),
     output: Path | None = typer.Option(None, "--output", "-o"),
+    design_alignment: Path | None = typer.Option(
+        None,
+        "--design-alignment",
+        dir_okay=False,
+    ),
 ) -> None:
     snapshot_storage = (
         _storage_root_for_approved_path(approved, storage)
@@ -325,7 +506,24 @@ def render_copilot(
         approved_model,
         snapshot_storage,
     )
-    result = TopicRenderer().render(approved_model, output)
+    design_alignment_model: ApprovedDesignAlignment | None = None
+    if design_alignment is not None:
+        try:
+            design_alignment_model = ApprovedDesignAlignment.model_validate_json(
+                design_alignment.read_text(encoding="utf-8")
+            )
+            DesignAlignmentApprovalService(snapshot_storage).require_approved_snapshot(
+                design_alignment,
+                design_alignment_model,
+                document_id=catalog_document_id,
+            )
+        except (OSError, ValueError) as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    result = TopicRenderer().render(
+        approved_model,
+        output,
+        design_alignment=design_alignment_model,
+    )
     typer.echo(f"Copilot context: {result.output_root}")
     typer.echo(f"Knowledge Markdown: {result.context_path}")
     typer.echo(f"Manifest: {result.manifest_path}")

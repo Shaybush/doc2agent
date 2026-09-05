@@ -1,15 +1,25 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from doc2agent.application import (
     CandidateProof,
+    DesignAlignmentApprovalPreview,
+    DesignAlignmentBindingPreview,
+    DesignAlignmentDraftPreview,
     DocumentProcessingError,
+    DocumentProcessingService,
+    FigmaImportRequestPreview,
+    FigmaNodePreview,
+    FigmaSnapshotPreview,
+    KnowledgeApprovalPreview,
     ProcessingResult,
     ProofEvidence,
     ProofFact,
+    UnmappedFigmaNodePreview,
 )
 from doc2agent.web.app import create_app
 
@@ -20,6 +30,10 @@ class StubProcessingService:
         self.sources: list[Path] = []
         self.document_ids: list[str | None] = []
         self.review_approvals: list[bool] = []
+        self.figma_import_requests: list[FigmaImportRequestPreview] = []
+        self.knowledge_approval: KnowledgeApprovalPreview | None = None
+        self.design_alignment_approval: DesignAlignmentApprovalPreview | None = None
+        self.candidate_generations = 0
 
     def process(
         self,
@@ -36,15 +50,18 @@ class StubProcessingService:
         return self.result
 
     def generate_candidate(self, result: ProcessingResult) -> CandidateProof:
+        self.candidate_generations += 1
         return CandidateProof(
             candidate_sha256="b" * 64,
             reviewed_block_ids=["block:reviewed"],
             facts=[
                 ProofFact(
+                    annotation_id="fact:explicit-requirement",
                     kind="requirement",
                     value="Explicit requirement",
                     evidence=[
                         ProofEvidence(
+                            block_id="block:reviewed",
                             support="explicit",
                             section_path=["Requirements"],
                             start_line=4,
@@ -65,6 +82,160 @@ class StubProcessingService:
         assert approved_by == "reviewer"
         assert proof.candidate_sha256 == "b" * 64
         return "# Approved knowledge\n\n- Explicit requirement\n"
+
+    def approve_and_publish_with_figma(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        approved_by: str,
+        figma_snapshot_sha256: str,
+    ) -> str:
+        assert approved_by == "reviewer"
+        assert proof.candidate_sha256 == "b" * 64
+        assert figma_snapshot_sha256 == "c" * 64
+        return "# Approved knowledge with Figma\n\n- Explicit requirement\n"
+
+    def approve_knowledge(
+        self, result: ProcessingResult, proof: CandidateProof, approved_by: str
+    ) -> KnowledgeApprovalPreview:
+        assert approved_by == "reviewer"
+        self.knowledge_approval = KnowledgeApprovalPreview(
+            candidate_sha256=proof.candidate_sha256
+        )
+        return self.knowledge_approval
+
+    def current_knowledge_approval(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> KnowledgeApprovalPreview | None:
+        return self.knowledge_approval
+
+    def approve_design_alignment(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        alignment_sha256: str,
+        approved_by: str,
+    ) -> DesignAlignmentApprovalPreview:
+        assert approved_by == "reviewer"
+        self.design_alignment_approval = DesignAlignmentApprovalPreview(
+            alignment_sha256=alignment_sha256,
+            figma_snapshot_sha256="c" * 64,
+        )
+        return self.design_alignment_approval
+
+    def current_design_alignment_approval(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> DesignAlignmentApprovalPreview | None:
+        return self.design_alignment_approval
+
+    def publish_copilot_with_design(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> str:
+        assert self.knowledge_approval is not None
+        assert self.design_alignment_approval is not None
+        return "# Approved knowledge with Figma\n\n- Explicit requirement\n"
+
+    def list_figma_snapshots(
+        self, result: ProcessingResult,
+    ) -> list[FigmaSnapshotPreview]:
+        return []
+
+    def list_excluded_figma_snapshots(
+        self, result: ProcessingResult
+    ) -> list[FigmaSnapshotPreview]:
+        return []
+
+    def exclude_figma_snapshot(self, result: ProcessingResult, snapshot_sha256: str) -> None:
+        return None
+
+    def restore_figma_snapshot(self, result: ProcessingResult, snapshot_sha256: str) -> None:
+        return None
+
+    def request_figma_capture(
+        self, result: ProcessingResult, figma_url: str
+    ) -> FigmaImportRequestPreview:
+        preview = FigmaImportRequestPreview(
+            request_sha256="d" * 64,
+            figma_url=figma_url,
+            requested_at="2026-09-04T00:00:00+00:00",
+            status="pending",
+        )
+        self.figma_import_requests = [preview]
+        return preview
+
+    def list_figma_import_requests(
+        self, result: ProcessingResult
+    ) -> list[FigmaImportRequestPreview]:
+        return self.figma_import_requests
+
+    def create_design_alignment_draft(self, *args, **kwargs) -> DesignAlignmentDraftPreview:
+        return DesignAlignmentDraftPreview(
+            alignment_sha256="e" * 64,
+            figma_snapshot_sha256="c" * 64,
+            bindings=[
+                DesignAlignmentBindingPreview(
+                    annotation_id="fact:explicit-requirement",
+                    evidence_block_id="block:reviewed",
+                    figma_node_id="2:15",
+                    status="matches",
+                )
+            ],
+        )
+
+    def list_figma_frame_mappings(self, *args, **kwargs) -> list:
+        return []
+
+    def exclude_figma_mapping(self, *args, **kwargs) -> None:
+        return None
+
+    def create_design_alignment_package(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        alignment_sha256s: list[str],
+    ) -> DesignAlignmentDraftPreview:
+        assert len(alignment_sha256s) >= 2
+        return DesignAlignmentDraftPreview(
+            alignment_sha256="g" * 64,
+            figma_snapshot_sha256="c" * 64,
+            bindings=[
+                DesignAlignmentBindingPreview(
+                    annotation_id="fact:explicit-requirement",
+                    evidence_block_id="block:reviewed",
+                    figma_node_id="2:15",
+                    status="matches",
+                ),
+                DesignAlignmentBindingPreview(
+                    annotation_id="fact:another-requirement",
+                    evidence_block_id="block:another",
+                    figma_node_id="2:16",
+                    status="partial",
+                ),
+            ],
+        )
+
+    def list_design_alignment_drafts(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> list[DesignAlignmentDraftPreview]:
+        return []
+
+    def list_reusable_design_alignment_drafts(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> list[DesignAlignmentDraftPreview]:
+        return []
+
+    def list_unmapped_figma_nodes(
+        self, result: ProcessingResult, proof: CandidateProof
+    ) -> list[UnmappedFigmaNodePreview]:
+        return []
+
+    def reuse_design_alignment_draft(
+        self,
+        result: ProcessingResult,
+        proof: CandidateProof,
+        alignment_sha256: str,
+    ) -> DesignAlignmentDraftPreview:
+        return self.create_design_alignment_draft(result, proof)
 
 
 def _result() -> ProcessingResult:
@@ -141,20 +312,35 @@ def test_published_copilot_markdown_is_available_only_when_present() -> None:
         files={"file": ("example.docx", b"document bytes")},
     )
 
-    assert "Published Copilot Markdown" in response.text
+    assert "Copilot Markdown published" in response.text
     artifact_id = next(iter(client.app.state.processed_artifacts._items))
     published = client.get(f"/documents/{artifact_id}/copilot-markdown")
     assert published.status_code == 200
     assert published.text == "# Approved knowledge\n"
 
 
-def test_candidate_proof_can_be_reviewed_then_approved_and_published() -> None:
+def test_unpublished_copilot_section_uses_a_review_state_not_a_published_heading() -> None:
     client = TestClient(create_app(service=StubProcessingService(_result())))
-    processed = client.post(
+
+    response = client.post(
         "/documents/process",
         files={"file": ("example.docx", b"document bytes")},
     )
-    assert processed.status_code == 200
+
+    assert "Copilot Markdown</h3>" in response.text
+    assert "Copilot Markdown not published" in response.text
+    assert "Not published yet. Generate a candidate to start the review." in response.text
+    assert 'class="candidate-action"' in response.text
+    assert response.text.count('class="artifact-section"') == 3
+
+
+def test_candidate_proof_can_be_reviewed_then_approved_and_published() -> None:
+    client = TestClient(create_app(service=StubProcessingService(_result())))
+    response = client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    assert response.status_code == 200
     artifact_id = next(iter(client.app.state.processed_artifacts._items))
 
     review = client.post(f"/documents/{artifact_id}/candidate")
@@ -168,8 +354,436 @@ def test_candidate_proof_can_be_reviewed_then_approved_and_published() -> None:
         data={"approved_by": "reviewer"},
     )
     assert published.status_code == 200
-    assert "Published Copilot Markdown" in published.text
+    assert "Copilot Markdown published" in published.text
     assert "Explicit requirement" in published.text
+
+
+def test_repeated_candidate_request_reuses_the_current_review_without_regeneration() -> None:
+    service = StubProcessingService(_result())
+    client = TestClient(create_app(service=service))
+    response = client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    assert response.status_code == 200
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+
+    first_review = client.post(f"/documents/{artifact_id}/candidate")
+    repeated_review = client.post(f"/documents/{artifact_id}/candidate")
+
+    assert first_review.status_code == 200
+    assert repeated_review.status_code == 200
+    assert "Candidate review / proof" in repeated_review.text
+    assert service.candidate_generations == 1
+
+
+def test_new_candidate_is_shown_as_not_yet_approved_not_an_approval_error() -> None:
+    service = DocumentProcessingService(storage_root="unused-for-this-unit-test")
+    proof = StubProcessingService(_result()).generate_candidate(_result())
+
+    with (
+        patch.object(service, "_candidate_for_proof", return_value=object()),
+        patch.object(
+            service,
+            "_require_current_knowledge",
+            side_effect=ValueError("Current approved knowledge belongs to a different candidate"),
+        ),
+    ):
+        assert service.current_knowledge_approval(_result(), proof) is None
+
+
+def test_candidate_review_displays_imported_figma_frames() -> None:
+    class FigmaAwareProcessingService(StubProcessingService):
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[
+                        FigmaNodePreview(
+                            node_id="2:15",
+                            name="אימייל לא תקין",
+                            kind="FRAME",
+                            figma_url=(
+                                "https://www.figma.com/design/file-key/Registration?node-id=2-15"
+                            ),
+                        )
+                    ],
+                )
+            ]
+
+    client = TestClient(create_app(service=FigmaAwareProcessingService(_result())))
+    client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+
+    review = client.post(f"/documents/{artifact_id}/candidate")
+
+    assert review.status_code == 200
+    assert "Figma snapshots" in review.text
+    assert "Snapshot version 1" in review.text
+    assert "Figma frames in this version" in review.text
+    assert 'class="figma-snapshot"' in review.text
+    assert "Exclude from current review" in review.text
+    assert "אימייל לא תקין" in review.text
+    assert "2:15" in review.text
+    assert "Create mapping draft" in review.text
+    assert 'name="binding_choice"' in review.text
+    assert 'class="inline-mapping-form"' in review.text
+    assert 'hx-trigger="change"' in review.text
+    assert 'hx-include="this"' not in review.text
+
+
+def test_candidate_review_can_request_a_figma_snapshot() -> None:
+    service = StubProcessingService(_result())
+    client = TestClient(create_app(service=service))
+    client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+    client.post(f"/documents/{artifact_id}/candidate")
+
+    response = client.post(
+        f"/documents/{artifact_id}/figma-import-request",
+        data={"figma_url": "https://www.figma.com/design/file-key/Registration"},
+    )
+
+    assert response.status_code == 200
+    assert "Request Figma snapshot" in response.text
+    assert "https://www.figma.com/design/file-key/Registration" in response.text
+
+
+def test_candidate_review_can_refresh_figma_status_without_requesting_capture() -> None:
+    class RefreshProcessingService(StubProcessingService):
+        def request_figma_capture(
+            self, result: ProcessingResult, figma_url: str
+        ) -> FigmaImportRequestPreview:
+            raise AssertionError("Refresh must not create a Figma capture request")
+
+        def list_figma_import_requests(
+            self, result: ProcessingResult
+        ) -> list[FigmaImportRequestPreview]:
+            return [
+                FigmaImportRequestPreview(
+                    request_sha256="d" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    requested_at="2026-09-04T00:00:00+00:00",
+                    status="captured",
+                    snapshot_sha256="c" * 64,
+                )
+            ]
+
+    client = TestClient(create_app(service=RefreshProcessingService(_result())))
+    client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+    client.post(f"/documents/{artifact_id}/candidate")
+
+    response = client.get(f"/documents/{artifact_id}/figma-status")
+
+    assert response.status_code == 200
+    assert "Refresh Figma status" in response.text
+    assert "captured" in response.text
+    assert "c" * 64 in response.text
+
+
+def test_refresh_figma_status_explains_when_the_local_review_session_has_reset() -> None:
+    client = TestClient(create_app(service=StubProcessingService(_result())))
+
+    response = client.get("/documents/missing-artifact/figma-status")
+
+    assert response.status_code == 200
+    assert "Stage:</strong> Session" in response.text
+    assert "local review session is no longer active" in response.text
+    assert "Upload the document and generate a candidate again." in response.text
+
+
+def test_candidate_review_creates_a_figma_mapping_draft() -> None:
+    class MappingProcessingService(StubProcessingService):
+        def __init__(self, result: ProcessingResult | Exception) -> None:
+            super().__init__(result)
+            self.drafts: list[DesignAlignmentDraftPreview] = []
+
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[
+                        FigmaNodePreview(
+                            node_id="2:15",
+                            name="אימייל לא תקין",
+                            kind="FRAME",
+                            figma_url=(
+                                "https://www.figma.com/design/file-key/Registration?node-id=2-15"
+                            ),
+                        )
+                    ],
+                )
+            ]
+
+        def create_design_alignment_draft(self, *args, **kwargs) -> DesignAlignmentDraftPreview:
+            preview = super().create_design_alignment_draft(*args, **kwargs)
+            self.drafts = [preview]
+            return preview
+
+        def list_design_alignment_drafts(
+            self, result: ProcessingResult, proof: CandidateProof
+        ) -> list[DesignAlignmentDraftPreview]:
+            return self.drafts
+
+    client = TestClient(create_app(service=MappingProcessingService(_result())))
+    client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+    client.post(f"/documents/{artifact_id}/candidate")
+
+    response = client.post(
+        f"/documents/{artifact_id}/design-alignment",
+        data={
+            "snapshot_sha256": "c" * 64,
+            "annotation_id": "fact:explicit-requirement",
+            "evidence_block_id": "block:reviewed",
+            "figma_node_id": "2:15",
+            "status": "matches",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Current Figma mappings" not in response.text
+    assert "fact:explicit-requirement" in response.text
+
+
+def test_mapping_draft_uses_one_requirement_evidence_pair() -> None:
+    class PairProcessingService(StubProcessingService):
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[],
+                )
+            ]
+
+        def create_design_alignment_draft(self, *args, **kwargs) -> DesignAlignmentDraftPreview:
+            assert kwargs["annotation_id"] == "fact:explicit-requirement"
+            assert kwargs["evidence_block_id"] == "block:reviewed"
+            return super().create_design_alignment_draft(*args, **kwargs)
+
+    client = TestClient(create_app(service=PairProcessingService(_result())))
+    client.post("/documents/process", files={"file": ("example.docx", b"document bytes")})
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+    client.post(f"/documents/{artifact_id}/candidate")
+
+    response = client.post(
+        f"/documents/{artifact_id}/design-alignment",
+        data={
+            "snapshot_sha256": "c" * 64,
+            "binding_choice": '["fact:explicit-requirement", "block:reviewed"]',
+            "figma_node_id": "2:15",
+            "status": "matches",
+        },
+    )
+
+    assert response.status_code == 200
+
+
+def test_candidate_review_hides_advanced_reuse_flow() -> None:
+    class ReuseProcessingService(StubProcessingService):
+        def __init__(self, result: ProcessingResult | Exception) -> None:
+            super().__init__(result)
+            self.reused: list[str] = []
+
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[],
+                )
+            ]
+
+        def list_reusable_design_alignment_drafts(
+            self, result: ProcessingResult, proof: CandidateProof
+        ) -> list[DesignAlignmentDraftPreview]:
+            if self.reused:
+                return []
+            return [
+                DesignAlignmentDraftPreview(
+                    alignment_sha256="e" * 64,
+                    figma_snapshot_sha256="c" * 64,
+                    source_candidate_sha256="d" * 64,
+                    bindings=[],
+                )
+            ]
+
+        def reuse_design_alignment_draft(
+            self,
+            result: ProcessingResult,
+            proof: CandidateProof,
+            alignment_sha256: str,
+        ) -> DesignAlignmentDraftPreview:
+            self.reused.append(alignment_sha256)
+            return super().reuse_design_alignment_draft(result, proof, alignment_sha256)
+
+    service = ReuseProcessingService(_result())
+    client = TestClient(create_app(service=service))
+    client.post("/documents/process", files={"file": ("example.docx", b"document bytes")})
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+
+    review = client.post(f"/documents/{artifact_id}/candidate")
+    assert "Reusable Figma mapping drafts" not in review.text
+    assert "Reuse for current candidate" not in review.text
+
+
+def test_figma_review_approves_and_saves_markdown_in_one_action() -> None:
+    class FigmaApprovalProcessingService(StubProcessingService):
+        def __init__(self, result: ProcessingResult | Exception) -> None:
+            super().__init__(result)
+            self.drafts = [
+                DesignAlignmentDraftPreview(
+                    alignment_sha256="e" * 64,
+                    figma_snapshot_sha256="c" * 64,
+                    bindings=[
+                        DesignAlignmentBindingPreview(
+                            annotation_id="fact:explicit-requirement",
+                            evidence_block_id="block:reviewed",
+                            figma_node_id="2:15",
+                            status="matches",
+                        )
+                    ],
+                )
+            ]
+
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[],
+                )
+            ]
+
+        def list_design_alignment_drafts(
+            self, result: ProcessingResult, proof: CandidateProof
+        ) -> list[DesignAlignmentDraftPreview]:
+            return self.drafts
+
+    service = FigmaApprovalProcessingService(_result())
+    client = TestClient(create_app(service=service))
+    client.post("/documents/process", files={"file": ("example.docx", b"document bytes")})
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+
+    review = client.post(f"/documents/{artifact_id}/candidate")
+    assert "Current Figma mappings" not in review.text
+    assert "Approve and save Copilot Markdown" in review.text
+    assert 'name="figma_snapshot_sha256"' in review.text
+    assert "Approval sequence" not in review.text
+
+    published = client.post(
+        f"/documents/{artifact_id}/approve-and-publish-figma",
+        data={"approved_by": "reviewer", "figma_snapshot_sha256": "c" * 64},
+    )
+    assert published.status_code == 200
+    assert "Copilot Markdown published" in published.text
+    assert "Approved knowledge with Figma" in published.text
+
+
+def test_candidate_review_can_create_a_same_snapshot_review_package() -> None:
+    class PackageProcessingService(StubProcessingService):
+        def __init__(self, result: ProcessingResult | Exception) -> None:
+            super().__init__(result)
+            self.drafts = [
+                DesignAlignmentDraftPreview(
+                    alignment_sha256="e" * 64,
+                    figma_snapshot_sha256="c" * 64,
+                    bindings=[
+                        DesignAlignmentBindingPreview(
+                            annotation_id="fact:explicit-requirement",
+                            evidence_block_id="block:reviewed",
+                            figma_node_id="2:2",
+                            status="matches",
+                        )
+                    ],
+                ),
+                DesignAlignmentDraftPreview(
+                    alignment_sha256="f" * 64,
+                    figma_snapshot_sha256="c" * 64,
+                    bindings=[
+                        DesignAlignmentBindingPreview(
+                            annotation_id="fact:another-requirement",
+                            evidence_block_id="block:another",
+                            figma_node_id="2:15",
+                            status="partial",
+                        )
+                    ],
+                ),
+            ]
+
+        def list_figma_snapshots(
+            self, result: ProcessingResult
+        ) -> list[FigmaSnapshotPreview]:
+            return [
+                FigmaSnapshotPreview(
+                    snapshot_sha256="c" * 64,
+                    figma_url="https://www.figma.com/design/file-key/Registration",
+                    captured_at="2026-09-04T00:00:00+00:00",
+                    nodes=[],
+                )
+            ]
+
+        def list_design_alignment_drafts(
+            self, result: ProcessingResult, proof: CandidateProof
+        ) -> list[DesignAlignmentDraftPreview]:
+            return self.drafts
+
+        def create_design_alignment_package(
+            self,
+            result: ProcessingResult,
+            proof: CandidateProof,
+            alignment_sha256s: list[str],
+        ) -> DesignAlignmentDraftPreview:
+            assert alignment_sha256s == ["e" * 64, "f" * 64]
+            package = super().create_design_alignment_package(
+                result, proof, alignment_sha256s
+            )
+            self.drafts.append(package)
+            return package
+
+    client = TestClient(create_app(service=PackageProcessingService(_result())))
+    client.post("/documents/process", files={"file": ("example.docx", b"document bytes")})
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+    client.post(f"/documents/{artifact_id}/candidate")
+
+    response = client.post(
+        f"/documents/{artifact_id}/design-alignment-package",
+        data={"alignment_sha256": ["e" * 64, "f" * 64]},
+    )
+
+    assert response.status_code == 200
+    assert "Current Figma mappings" not in response.text
 
 
 def test_unsupported_extension_returns_readable_error() -> None:

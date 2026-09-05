@@ -9,6 +9,7 @@ from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
+from doc2agent.design.alignment import ApprovedDesignAlignment, DesignAlignmentBuilder
 from doc2agent.semantic.candidate import KnowledgeCandidate
 from doc2agent.semantic.candidate_review import CandidateReviewer
 from doc2agent.semantic.models import (
@@ -52,19 +53,21 @@ class CopilotContextResult:
 class TopicRenderer:
     """Render a deterministic Copilot context only from an approved snapshot."""
 
-    renderer_version = "7"
+    renderer_version = "8"
 
     def render(
         self,
         approved: KnowledgeCandidate,
         output_root: str | Path = "storage/copilot-context",
+        design_alignment: ApprovedDesignAlignment | None = None,
     ) -> CopilotContextResult:
         CandidateReviewer().review(approved)
+        self._validate_design_alignment(approved, design_alignment)
         output_root = Path(output_root)
         version_root = output_root.parent / f".{output_root.name}-versions"
-        version_path = version_root / f"{approved.candidate_sha256}-v{self.renderer_version}"
+        version_path = version_root / self._version_name(approved, design_alignment)
         context_filename = self._context_filename(approved)
-        self._ensure_version(version_path, approved, context_filename)
+        self._ensure_version(version_path, approved, context_filename, design_alignment)
         self._activate_version(output_root, version_path)
         return CopilotContextResult(
             output_root=output_root,
@@ -78,6 +81,7 @@ class TopicRenderer:
         version_path: Path,
         approved: KnowledgeCandidate,
         context_filename: str,
+        design_alignment: ApprovedDesignAlignment | None,
     ) -> None:
         if version_path.exists():
             manifest_path = version_path / "manifest.json"
@@ -87,6 +91,8 @@ class TopicRenderer:
             if (
                 manifest.get("approved_candidate_sha256") != approved.candidate_sha256
                 or manifest.get("renderer_version") != self.renderer_version
+                or manifest.get("design_alignment_sha256")
+                != self._design_alignment_sha256(design_alignment)
             ):
                 raise ValueError("Existing Copilot context version has a mismatched hash")
             return
@@ -95,8 +101,8 @@ class TopicRenderer:
         temporary_path = version_path.with_name(f".{version_path.name}.{uuid4().hex}.tmp")
         try:
             temporary_path.mkdir()
-            agent_content = self._agent_markdown(approved)
-            index_content = self._index_markdown(approved)
+            agent_content = self._agent_markdown(approved, design_alignment)
+            index_content = self._index_markdown(approved, design_alignment)
             (temporary_path / context_filename).write_text(agent_content, encoding="utf-8")
             (temporary_path / "INDEX.md").write_text(index_content, encoding="utf-8")
             manifest = self._manifest(
@@ -104,6 +110,7 @@ class TopicRenderer:
                 index_content,
                 agent_content,
                 context_filename,
+                design_alignment,
             )
             (temporary_path / "manifest.json").write_text(
                 json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -131,20 +138,33 @@ class TopicRenderer:
                 temporary_link.unlink()
 
     @staticmethod
-    def _header(approved: KnowledgeCandidate) -> list[str]:
-        return [
+    def _header(
+        approved: KnowledgeCandidate,
+        design_alignment: ApprovedDesignAlignment | None = None,
+    ) -> list[str]:
+        header = [
             "<!-- GENERATED — DO NOT EDIT -->",
             f"<!-- approved_candidate_sha256: {approved.candidate_sha256} -->",
             f"<!-- source_id: {approved.source_id} -->",
         ]
+        if design_alignment is not None:
+            header.append(
+                "<!-- design_alignment_sha256: "
+                f"{design_alignment.alignment.alignment_sha256} -->"
+            )
+        return header
 
-    def _index_markdown(self, approved: KnowledgeCandidate) -> str:
+    def _index_markdown(
+        self,
+        approved: KnowledgeCandidate,
+        design_alignment: ApprovedDesignAlignment | None,
+    ) -> str:
         counts = {kind: 0 for kind in COPILOT_CONTEXT_KINDS}
         for annotation in approved.annotations:
             counts[annotation.kind] += 1
         return "\n".join(
             [
-                *self._header(approved),
+                *self._header(approved, design_alignment),
                 "",
                 "# Copilot context index",
                 "",
@@ -158,12 +178,21 @@ class TopicRenderer:
                 f"- Decisions: {counts['decision']}",
                 f"- Architecture and pipeline: {counts['architecture_pipeline']}",
                 f"- Action items: {counts['action_item']}",
+                *(
+                    ["- [Approved Figma designs](#approved-figma-designs)"]
+                    if design_alignment is not None
+                    else []
+                ),
                 "",
             ]
         )
 
-    def _agent_markdown(self, approved: KnowledgeCandidate) -> str:
-        lines = [*self._header(approved), "", "# Approved knowledge", ""]
+    def _agent_markdown(
+        self,
+        approved: KnowledgeCandidate,
+        design_alignment: ApprovedDesignAlignment | None,
+    ) -> str:
+        lines = [*self._header(approved, design_alignment), "", "# Approved knowledge", ""]
         annotations = sorted(
             approved.annotations,
             key=lambda item: (item.kind, item.id, item.value),
@@ -174,15 +203,66 @@ class TopicRenderer:
                 continue
             lines.extend([f"## {COPILOT_CONTEXT_LABELS[kind]}", ""])
             for fact in facts:
-                lines.append(f"- {self._fact_value_markdown(fact)}")
+                lines.extend(self.fact_markdown_lines(fact))
             lines.append("")
+        if design_alignment is not None:
+            lines.extend(self._design_markdown(design_alignment))
         return "\n".join(lines)
+
+    @staticmethod
+    def _design_markdown(design_alignment: ApprovedDesignAlignment) -> list[str]:
+        nodes = {node.node_id: node for node in design_alignment.snapshot.nodes}
+        bindings = sorted(
+            (
+                binding
+                for binding in design_alignment.alignment.bindings
+                if binding.status in {"matches", "partial"} and binding.figma_node_id
+            ),
+            key=lambda binding: (
+                binding.figma_node_id or "",
+                binding.annotation_id or "",
+                binding.status,
+            ),
+        )
+        if not bindings:
+            return []
+        lines = ["## Approved Figma designs", ""]
+        for binding in bindings:
+            node = nodes[binding.figma_node_id or ""]
+            card = [
+                f"### {node.name}",
+                "",
+                f"- Frame: [{node.name}]({node.figma_url})",
+                f"- Figma node: `{node.node_id}`",
+                "- Snapshot: " f"`sha256:{design_alignment.snapshot.snapshot_sha256}`",
+                f"- Requirement: `{binding.annotation_id}`",
+                f"- Review status: {binding.status}",
+                "",
+            ]
+            if TopicRenderer._contains_hebrew(node.name):
+                lines.extend(["<div dir=\"rtl\">", "", *card, "</div>", ""])
+            else:
+                lines.extend(card)
+        return lines
 
     @staticmethod
     def _fact_value_markdown(
         fact: SemanticAnnotation,
     ) -> str:
         return copilot_fact_value(fact)
+
+    @staticmethod
+    def fact_markdown_lines(fact: SemanticAnnotation) -> list[str]:
+        """Return one fact in the canonical Copilot Markdown representation."""
+
+        value = TopicRenderer._fact_value_markdown(fact)
+        if not TopicRenderer._contains_hebrew(value):
+            return [f"- {value}"]
+        return ["<div dir=\"rtl\">", "", f"- {value}", "", "</div>"]
+
+    @staticmethod
+    def _contains_hebrew(value: str) -> bool:
+        return any("\u0590" <= character <= "\u05ff" for character in value)
 
     @staticmethod
     def _context_filename(approved: KnowledgeCandidate) -> str:
@@ -198,6 +278,7 @@ class TopicRenderer:
         index_content: str,
         agent_content: str,
         context_filename: str,
+        design_alignment: ApprovedDesignAlignment | None,
     ) -> dict[str, object]:
         files = [
             {"path": "INDEX.md", "sha256": sha256(index_content.encode("utf-8")).hexdigest()},
@@ -211,5 +292,48 @@ class TopicRenderer:
             "renderer_version": self.renderer_version,
             "approved_candidate_sha256": approved.candidate_sha256,
             "source_id": approved.source_id,
+            "design_alignment_sha256": self._design_alignment_sha256(design_alignment),
             "files": files,
         }
+
+    @staticmethod
+    def _design_alignment_sha256(
+        design_alignment: ApprovedDesignAlignment | None,
+    ) -> str | None:
+        if design_alignment is None:
+            return None
+        return design_alignment.alignment.alignment_sha256
+
+    @staticmethod
+    def _version_name(
+        approved: KnowledgeCandidate,
+        design_alignment: ApprovedDesignAlignment | None,
+    ) -> str:
+        if design_alignment is None:
+            return f"{approved.candidate_sha256}-v{TopicRenderer.renderer_version}"
+        return (
+            f"{approved.candidate_sha256}-design-"
+            f"{design_alignment.alignment.alignment_sha256}-v{TopicRenderer.renderer_version}"
+        )
+
+    @staticmethod
+    def _validate_design_alignment(
+        approved: KnowledgeCandidate,
+        design_alignment: ApprovedDesignAlignment | None,
+    ) -> None:
+        if design_alignment is None:
+            return
+        alignment = design_alignment.alignment
+        if alignment.source_id != approved.source_id:
+            raise ValueError("Design alignment belongs to a different source")
+        if alignment.structural_sha256 != approved.structural_sha256:
+            raise ValueError("Design alignment belongs to a different structural revision")
+        if alignment.candidate_sha256 != approved.candidate_sha256:
+            raise ValueError("Design alignment belongs to a different knowledge candidate")
+        if alignment.figma_snapshot_sha256 != design_alignment.snapshot.snapshot_sha256:
+            raise ValueError("Design alignment belongs to a different Figma snapshot")
+        DesignAlignmentBuilder._validate_bindings(
+            approved,
+            design_alignment.snapshot,
+            alignment.bindings,
+        )

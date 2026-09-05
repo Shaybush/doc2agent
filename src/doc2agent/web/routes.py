@@ -11,7 +11,11 @@ from fastapi import APIRouter, Form, Request, UploadFile
 from fastapi.responses import PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
-from doc2agent.application import CandidateProof, DocumentProcessingError, ProcessingResult
+from doc2agent.application import (
+    CandidateProof,
+    DocumentProcessingError,
+    ProcessingResult,
+)
 from doc2agent.converter import safe_name
 
 logger = logging.getLogger(__name__)
@@ -128,6 +132,9 @@ def create_router() -> APIRouter:
         result = artifacts.get(artifact_id)
         if result is None:
             return _error_response(request, "Candidate", "Processing result was not found.")
+        cached_proof = artifacts.candidate(artifact_id)
+        if cached_proof is not None:
+            return _candidate_response(request, artifact_id, result, cached_proof)
         try:
             proof = request.app.state.processing_service.generate_candidate(result)
         except DocumentProcessingError as exc:
@@ -138,11 +145,109 @@ def create_router() -> APIRouter:
                 request, "Candidate", "Could not generate a candidate. Check server logs."
             )
         artifacts.set_candidate(artifact_id, proof)
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/candidate.html",
-            context={"artifact_id": artifact_id, "proof": proof},
-        )
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.post("/documents/{artifact_id}/figma-import-request")
+    async def request_figma_import(artifact_id: str, request: Request):
+        form = await request.form()
+        figma_url = str(form.get("figma_url", ""))
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.request_figma_capture(result, figma_url)
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.get("/documents/{artifact_id}/figma-status")
+    def refresh_figma_status(artifact_id: str, request: Request):
+        """Re-render the review using the latest separately captured Figma state."""
+
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(
+                request,
+                "Session",
+                "This local review session is no longer active. It may have reset after "
+                "the server restarted. Upload the document and generate a candidate again.",
+            )
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.post("/documents/{artifact_id}/exclude-figma-snapshot")
+    async def exclude_figma_snapshot(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.exclude_figma_snapshot(
+                result, str(form.get("snapshot_sha256", ""))
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.post("/documents/{artifact_id}/restore-figma-snapshot")
+    async def restore_figma_snapshot(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.restore_figma_snapshot(
+                result, str(form.get("snapshot_sha256", ""))
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.post("/documents/{artifact_id}/design-alignment")
+    async def create_design_alignment(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            annotation_id, evidence_block_id = _binding_fields(form)
+            request.app.state.processing_service.create_design_alignment_draft(
+                result,
+                proof,
+                snapshot_sha256=str(form.get("snapshot_sha256", "")),
+                annotation_id=annotation_id,
+                evidence_block_id=evidence_block_id,
+                figma_node_id=str(form.get("figma_node_id", "")),
+                status=str(form.get("status", "")),
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.post("/documents/{artifact_id}/exclude-figma-mapping")
+    async def exclude_figma_mapping(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.exclude_figma_mapping(
+                result, str(form.get("alignment_sha256", ""))
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
 
     @router.post("/documents/{artifact_id}/approve")
     async def approve_candidate(artifact_id: str, request: Request):
@@ -156,6 +261,123 @@ def create_router() -> APIRouter:
         try:
             final_markdown = request.app.state.processing_service.approve_and_publish(
                 result, proof, approved_by
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        updated_result = result.model_copy(
+            update={"published_copilot_markdown": final_markdown}
+        )
+        artifacts.replace(artifact_id, updated_result)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/result.html",
+            context={"artifact_id": artifact_id, "result": updated_result},
+        )
+
+    @router.post("/documents/{artifact_id}/approve-and-publish-figma")
+    async def approve_and_publish_figma(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Approval", "Generate and review a candidate first.")
+        try:
+            final_markdown = request.app.state.processing_service.approve_and_publish_with_figma(
+                result,
+                proof,
+                str(form.get("approved_by", "")),
+                str(form.get("figma_snapshot_sha256", "")),
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        updated_result = result.model_copy(
+            update={"published_copilot_markdown": final_markdown}
+        )
+        artifacts.replace(artifact_id, updated_result)
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/result.html",
+            context={"artifact_id": artifact_id, "result": updated_result},
+        )
+
+    @router.post("/documents/{artifact_id}/design-alignment-package")
+    async def create_design_alignment_package(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.create_design_alignment_package(
+                result, proof, [str(value) for value in form.getlist("alignment_sha256")]
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.post("/documents/{artifact_id}/reuse-design-alignment")
+    async def reuse_design_alignment(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Figma", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.reuse_design_alignment_draft(
+                result, proof, str(form.get("alignment_sha256", ""))
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.post("/documents/{artifact_id}/approve-knowledge")
+    async def approve_knowledge(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Approval", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.approve_knowledge(
+                result, proof, str(form.get("approved_by", ""))
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.post("/documents/{artifact_id}/approve-design-alignment")
+    async def approve_design_alignment(artifact_id: str, request: Request):
+        form = await request.form()
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Approval", "Generate and review a candidate first.")
+        try:
+            request.app.state.processing_service.approve_design_alignment(
+                result,
+                proof,
+                str(form.get("alignment_sha256", "")),
+                str(form.get("approved_by", "")),
+            )
+        except DocumentProcessingError as exc:
+            return _error_response(request, exc.stage, exc.reason)
+        return _candidate_response(request, artifact_id, result, proof)
+
+    @router.post("/documents/{artifact_id}/publish-copilot-with-design")
+    def publish_copilot_with_design(artifact_id: str, request: Request):
+        artifacts = request.app.state.processed_artifacts
+        result = artifacts.get(artifact_id)
+        proof = artifacts.candidate(artifact_id)
+        if result is None or proof is None:
+            return _error_response(request, "Approval", "Generate and review a candidate first.")
+        try:
+            final_markdown = request.app.state.processing_service.publish_copilot_with_design(
+                result, proof
             )
         except DocumentProcessingError as exc:
             return _error_response(request, exc.stage, exc.reason)
@@ -244,6 +466,69 @@ async def _save_upload(
 
 def _download_stem(filename: str) -> str:
     return safe_name(Path(filename).stem)
+
+
+def _binding_fields(form) -> tuple[str, str]:
+    """Accept one UI-selected requirement/evidence pair or the legacy fields."""
+
+    choice = form.get("binding_choice")
+    if choice is None:
+        return str(form.get("annotation_id", "")), str(form.get("evidence_block_id", ""))
+    try:
+        annotation_id, evidence_block_id = json.loads(str(choice))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise DocumentProcessingError("Figma", "Choose one requirement and its evidence.") from exc
+    if not (
+        isinstance(annotation_id, str)
+        and annotation_id
+        and isinstance(evidence_block_id, str)
+        and evidence_block_id
+    ):
+        raise DocumentProcessingError("Figma", "Choose one requirement and its evidence.")
+    return annotation_id, evidence_block_id
+
+
+def _candidate_response(
+    request: Request,
+    artifact_id: str,
+    result: ProcessingResult,
+    proof: CandidateProof,
+):
+    try:
+        service = request.app.state.processing_service
+        figma_snapshots = service.list_figma_snapshots(result)
+        excluded_figma_snapshots = service.list_excluded_figma_snapshots(result)
+        figma_import_requests = service.list_figma_import_requests(result)
+        design_alignment_drafts = service.list_design_alignment_drafts(result, proof)
+        figma_frame_mappings = service.list_figma_frame_mappings(result, proof)
+        unmapped_figma_nodes = service.list_unmapped_figma_nodes(result, proof)
+    except DocumentProcessingError as exc:
+        return _error_response(request, exc.stage, exc.reason)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/candidate.html",
+        context={
+            "artifact_id": artifact_id,
+            "proof": proof,
+            "figma_snapshots": figma_snapshots,
+            "excluded_figma_snapshots": excluded_figma_snapshots,
+            "figma_import_requests": figma_import_requests,
+            "design_alignment_drafts": design_alignment_drafts,
+            "figma_frame_mappings": figma_frame_mappings,
+            "figma_mapped_annotation_ids": {
+                snapshot.snapshot_sha256: {
+                    mapping.annotation_id
+                    for mapping in figma_frame_mappings
+                    if mapping.snapshot_sha256 == snapshot.snapshot_sha256
+                }
+                for snapshot in figma_snapshots
+            },
+            "figma_mapping_snapshot_hashes": sorted(
+                {draft.figma_snapshot_sha256 for draft in design_alignment_drafts}
+            ),
+            "unmapped_figma_nodes": unmapped_figma_nodes,
+        },
+    )
 
 
 def _error_response(request: Request, stage: str, reason: str):
