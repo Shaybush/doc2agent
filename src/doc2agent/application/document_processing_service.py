@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from doc2agent.design import (
+    ApprovedDesignAlignment,
     DesignAlignmentApprovalService,
     DesignAlignmentBuilder,
     DesignAlignmentReviewStore,
@@ -187,26 +189,25 @@ class DocumentProcessingService:
     def approve_and_publish(
         self, result: ProcessingResult, proof: CandidateProof, approved_by: str
     ) -> str:
-        candidate_path = (
-            self.storage_root
-            / "artifacts"
-            / result.source_id.replace(":", "-")
-            / "candidate"
-            / f"{proof.candidate_sha256}.knowledge.json"
-        )
         try:
-            candidate = KnowledgeCandidate.model_validate_json(
-                candidate_path.read_text(encoding="utf-8")
-            )
-            if candidate.source_id != result.source_id:
-                raise ValueError("Candidate does not belong to this document revision")
-            ApprovalService(self.storage_root).approve(
-                candidate, document_id=result.document_id, approved_by=approved_by
+            candidate = self._candidate_for_proof(result, proof)
+            approval = ApprovalService(self.storage_root)
+            current_path = approval.current_path(result.document_id)
+            previous_snapshot = (
+                current_path.read_text(encoding="utf-8") if current_path.is_file() else None
             )
             output = copilot_context_output_path(candidate, self.storage_root, result.document_id)
-            return (
-                TopicRenderer().render(candidate, output).context_path.read_text(encoding="utf-8")
+            renderer = TopicRenderer()
+            prepared = renderer.prepare(candidate, output)
+            approval.approve(
+                candidate, document_id=result.document_id, approved_by=approved_by
             )
+            try:
+                published = renderer.activate_prepared(prepared)
+            except (OSError, ValueError):
+                approval.restore_current_snapshot(result.document_id, previous_snapshot)
+                raise
+            return published.context_path.read_text(encoding="utf-8")
         except (OSError, ValueError) as exc:
             raise DocumentProcessingError("Approval", str(exc)) from exc
 
@@ -318,6 +319,8 @@ class DocumentProcessingService:
         """Approve one candidate with mappings from one explicitly selected snapshot."""
 
         try:
+            if not approved_by.strip():
+                raise ValueError("Approval actor must not be empty")
             candidate = self._candidate_for_proof(result, proof)
             excluded = FigmaSnapshotReviewStore(
                 self.storage_root
@@ -377,10 +380,34 @@ class DocumentProcessingService:
             )
             DesignAlignmentStore(self.storage_root).write(alignment)
             approval = ApprovalService(self.storage_root)
+            design_approval = DesignAlignmentApprovalService(self.storage_root)
+            current_path = approval.current_path(result.document_id)
+            previous_knowledge = (
+                current_path.read_text(encoding="utf-8") if current_path.is_file() else None
+            )
+            design_current_path = design_approval.current_path(result.document_id)
+            previous_design = (
+                design_current_path.read_text(encoding="utf-8")
+                if design_current_path.is_file()
+                else None
+            )
+            prepared_design = ApprovedDesignAlignment(
+                document_id=result.document_id,
+                alignment=alignment,
+                snapshot=snapshot,
+                approved_by=approved_by.strip(),
+                approved_at=datetime.now(UTC),
+            )
+            output = copilot_context_output_path(candidate, self.storage_root, result.document_id)
+            renderer = TopicRenderer()
+            prepared_context = renderer.prepare(
+                candidate,
+                output,
+                design_alignment=prepared_design,
+            )
             knowledge_path = approval.approve(
                 candidate, document_id=result.document_id, approved_by=approved_by
             )
-            design_approval = DesignAlignmentApprovalService(self.storage_root)
             design_approval.approve(
                 alignment,
                 candidate,
@@ -389,12 +416,13 @@ class DocumentProcessingService:
                 approved_by=approved_by,
                 knowledge_path=knowledge_path,
             )
-            output = copilot_context_output_path(candidate, self.storage_root, result.document_id)
-            return TopicRenderer().render(
-                candidate,
-                output,
-                design_alignment=design_approval.load_current(result.document_id),
-            ).context_path.read_text(encoding="utf-8")
+            try:
+                published = renderer.activate_prepared(prepared_context)
+            except (OSError, ValueError):
+                design_approval.restore_current_snapshot(result.document_id, previous_design)
+                approval.restore_current_snapshot(result.document_id, previous_knowledge)
+                raise
+            return published.context_path.read_text(encoding="utf-8")
         except (OSError, ValueError) as exc:
             raise DocumentProcessingError("Approval", str(exc)) from exc
 
@@ -787,6 +815,12 @@ class DocumentProcessingService:
         )
         if candidate.source_id != result.source_id:
             raise ValueError("Candidate does not belong to this document revision")
+        from doc2agent.security import SecurityResult
+
+        security_path = self._artifact_path(result.source_id, "security", ".security.json")
+        security = SecurityResult.model_validate_json(security_path.read_text(encoding="utf-8"))
+        if candidate.sanitized_document_sha256 != security.sanitized_document_sha256:
+            raise ValueError("Candidate does not match the security-reviewed document")
         return candidate
 
     def _require_current_knowledge(

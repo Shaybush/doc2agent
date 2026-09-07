@@ -50,6 +50,16 @@ class CopilotContextResult:
     approved_candidate_sha256: str
 
 
+@dataclass(frozen=True)
+class PreparedCopilotContext:
+    """An immutable context version that has not yet been made current."""
+
+    output_root: Path
+    version_path: Path
+    context_filename: str
+    approved_candidate_sha256: str
+
+
 class TopicRenderer:
     """Render a deterministic Copilot context only from an approved snapshot."""
 
@@ -61,6 +71,17 @@ class TopicRenderer:
         output_root: str | Path = "storage/copilot-context",
         design_alignment: ApprovedDesignAlignment | None = None,
     ) -> CopilotContextResult:
+        prepared = self.prepare(approved, output_root, design_alignment)
+        return self.activate_prepared(prepared)
+
+    def prepare(
+        self,
+        approved: KnowledgeCandidate,
+        output_root: str | Path = "storage/copilot-context",
+        design_alignment: ApprovedDesignAlignment | None = None,
+    ) -> PreparedCopilotContext:
+        """Write or verify an immutable context version without activating it."""
+
         CandidateReviewer().review(approved)
         self._validate_design_alignment(approved, design_alignment)
         output_root = Path(output_root)
@@ -68,12 +89,22 @@ class TopicRenderer:
         version_path = version_root / self._version_name(approved, design_alignment)
         context_filename = self._context_filename(approved)
         self._ensure_version(version_path, approved, context_filename, design_alignment)
-        self._activate_version(output_root, version_path)
-        return CopilotContextResult(
+        return PreparedCopilotContext(
             output_root=output_root,
-            context_path=output_root / context_filename,
-            manifest_path=output_root / "manifest.json",
+            version_path=version_path,
+            context_filename=context_filename,
             approved_candidate_sha256=approved.candidate_sha256,
+        )
+
+    def activate_prepared(self, prepared: PreparedCopilotContext) -> CopilotContextResult:
+        """Atomically make a previously prepared immutable version current."""
+
+        self._activate_version(prepared.output_root, prepared.version_path)
+        return CopilotContextResult(
+            output_root=prepared.output_root,
+            context_path=prepared.output_root / prepared.context_filename,
+            manifest_path=prepared.output_root / "manifest.json",
+            approved_candidate_sha256=prepared.approved_candidate_sha256,
         )
 
     def _ensure_version(
@@ -87,7 +118,12 @@ class TopicRenderer:
             manifest_path = version_path / "manifest.json"
             if not manifest_path.is_file():
                 raise ValueError("Existing Copilot context version is incomplete")
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError("Existing Copilot context version is incomplete") from exc
+            if not isinstance(manifest, dict):
+                raise ValueError("Existing Copilot context version is incomplete")
             if (
                 manifest.get("approved_candidate_sha256") != approved.candidate_sha256
                 or manifest.get("renderer_version") != self.renderer_version
@@ -95,6 +131,7 @@ class TopicRenderer:
                 != self._design_alignment_sha256(design_alignment)
             ):
                 raise ValueError("Existing Copilot context version has a mismatched hash")
+            self._validate_version_files(version_path, manifest, context_filename)
             return
 
         version_path.parent.mkdir(parents=True, exist_ok=True)
@@ -270,7 +307,43 @@ class TopicRenderer:
         if manifest is None:
             raise ValueError("Approved knowledge is missing its source manifest")
         filename = Path(manifest.filename).name
-        return f"{Path(filename).stem}.md"
+        context_filename = f"{Path(filename).stem}.md"
+        if context_filename.casefold() == "index.md":
+            return "INDEX.approved-knowledge.md"
+        return context_filename
+
+    @staticmethod
+    def _validate_version_files(
+        version_path: Path,
+        manifest: dict[str, object],
+        context_filename: str,
+    ) -> None:
+        files = manifest.get("files")
+        if not isinstance(files, list):
+            raise ValueError("Existing Copilot context version is incomplete")
+        expected_paths = {"INDEX.md", context_filename}
+        hashes: dict[str, str] = {}
+        for file_entry in files:
+            if not isinstance(file_entry, dict):
+                raise ValueError("Existing Copilot context version is incomplete")
+            path = file_entry.get("path")
+            digest = file_entry.get("sha256")
+            if (
+                not isinstance(path, str)
+                or not isinstance(digest, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or path in hashes
+            ):
+                raise ValueError("Existing Copilot context version is incomplete")
+            hashes[path] = digest
+        if set(hashes) != expected_paths:
+            raise ValueError("Existing Copilot context version is incomplete")
+        for relative_path, expected_digest in hashes.items():
+            artifact_path = version_path / relative_path
+            if not artifact_path.is_file():
+                raise ValueError("Existing Copilot context version is incomplete")
+            if sha256(artifact_path.read_bytes()).hexdigest() != expected_digest:
+                raise ValueError("Existing Copilot context version has a mismatched hash")
 
     def _manifest(
         self,

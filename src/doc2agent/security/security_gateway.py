@@ -3,6 +3,8 @@ import re
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from doc2agent.artifacts import canonical_json_sha256
+
 from .models import (
     SecurityAction,
     SecurityDecision,
@@ -99,6 +101,7 @@ class SecurityGateway:
         return SecurityResult(
             decision=decision,
             sanitized_document=sanitized_document,
+            sanitized_document_sha256=canonical_json_sha256(sanitized_document),
             findings=findings,
         )
 

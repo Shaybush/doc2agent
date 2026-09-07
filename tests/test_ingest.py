@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from doc2agent.design import FigmaNode, FigmaSnapshot, FigmaSnapshotStore
+from doc2agent.design.import_request import FigmaImportRequestStore
 from doc2agent.ingest import IngestDecision, IngestService
 
 
@@ -67,6 +70,21 @@ def test_ingest_reuses_identical_source_without_overwriting_it(
     assert second.manifest.source_id == first.manifest.source_id
     assert second.document_id == first.document_id
     assert second.source_path.read_bytes() == stored_bytes
+
+
+def test_ingest_rejects_duplicate_content_for_a_different_document(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "requirements.docx"
+    _write_docx(source)
+    service = IngestService(tmp_path / "storage")
+
+    first = service.ingest(source, document_id="document:requirements")
+
+    with pytest.raises(ValueError, match="already belongs to a different document"):
+        service.ingest(source, document_id="document:other")
+
+    assert service.document_id_for_source(first.manifest.source_id) == first.document_id
 
 
 def test_ingest_records_changed_source_as_new_version_automatically(
@@ -202,6 +220,17 @@ def test_delete_document_previews_then_moves_all_versions_to_trash(
     approved_dir = service._approved_document_dir(first.document_id)
     approved_dir.mkdir(parents=True)
     (approved_dir / "current.knowledge.json").write_text("{}", encoding="utf-8")
+    design_approved_dir = service._design_approved_document_dir(first.document_id)
+    design_approved_dir.mkdir(parents=True)
+    (design_approved_dir / "current.design-alignment.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    figma_request = FigmaImportRequestStore(storage).create(
+        second.manifest.source_id, "https://www.figma.com/design/file-key/Example"
+    )
+    figma_request_dir = FigmaImportRequestStore(storage).path_for(
+        second.manifest.source_id, figma_request.request_sha256
+    ).parent
     version_root = storage / "copilot-context" / ".requirements--document-test-versions"
     version = version_root / "candidate-v5"
     version.mkdir(parents=True)
@@ -226,6 +255,8 @@ def test_delete_document_previews_then_moves_all_versions_to_trash(
     assert second.source_path.exists()
     assert first_artifacts.exists()
     assert second_artifacts.exists()
+    assert design_approved_dir in preview.paths
+    assert figma_request_dir in preview.paths
 
     deleted = service.delete_document(first.document_id, confirm=True)
 
@@ -237,6 +268,8 @@ def test_delete_document_previews_then_moves_all_versions_to_trash(
     assert not first_artifacts.exists()
     assert not second_artifacts.exists()
     assert not approved_dir.exists()
+    assert not design_approved_dir.exists()
+    assert not figma_request_dir.exists()
     assert not context_root.exists()
     assert not version_root.exists()
     assert 'document:other' in approval_log.read_text(encoding="utf-8")
@@ -248,6 +281,71 @@ def test_delete_document_previews_then_moves_all_versions_to_trash(
     )
     assert catalog["documents"] == {}
     assert catalog["sources"] == {}
+
+
+def test_delete_document_rollback_restores_relative_context_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "requirements.docx"
+    storage = tmp_path / "storage"
+    _write_docx(source)
+    service = IngestService(storage)
+    ingested = service.ingest(source)
+    version_root = storage / "copilot-context" / ".requirements-versions"
+    version = version_root / "candidate-v1"
+    version.mkdir(parents=True)
+    (version / "manifest.json").write_text(
+        json.dumps({"source_id": ingested.manifest.source_id}), encoding="utf-8"
+    )
+    context_root = storage / "copilot-context" / "requirements"
+    context_root.symlink_to(".requirements-versions/candidate-v1", target_is_directory=True)
+
+    def fail_catalog_write(path: Path, payload: object) -> None:
+        if path.name == "source-catalog.json":
+            raise OSError("catalog write failed")
+
+    monkeypatch.setattr(service, "_write_json_atomic", fail_catalog_write)
+
+    with pytest.raises(OSError, match="catalog write failed"):
+        service.delete_document(ingested.document_id, confirm=True)
+
+    assert context_root.is_symlink()
+    assert context_root.readlink() == Path(".requirements-versions/candidate-v1")
+    assert context_root.exists()
+    assert version.exists()
+
+
+def test_delete_document_removes_figma_artifacts_without_registered_pipeline_root(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "requirements.docx"
+    storage = tmp_path / "storage"
+    _write_docx(source)
+    service = IngestService(storage)
+    ingested = service.ingest(source)
+    snapshot = FigmaSnapshot.build(
+        figma_file_key="requirements",
+        figma_url="https://www.figma.com/design/requirements/Requirements",
+        nodes=[
+            FigmaNode(
+                node_id="1:2",
+                name="Requirements",
+                kind="FRAME",
+                figma_url="https://www.figma.com/design/requirements/Requirements?node-id=1-2",
+            )
+        ],
+        adapter="fixture",
+        captured_at=datetime(2026, 9, 6, tzinfo=UTC),
+    )
+    snapshot_path = FigmaSnapshotStore(storage).write(ingested.manifest.source_id, snapshot)
+    artifact_root = snapshot_path.parents[1]
+
+    preview = service.delete_document(ingested.document_id)
+    assert artifact_root in preview.paths
+
+    service.delete_document(ingested.document_id, confirm=True)
+    assert not artifact_root.exists()
 
 
 def test_record_artifact_root_refuses_non_isolated_path(tmp_path: Path) -> None:

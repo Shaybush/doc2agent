@@ -38,6 +38,7 @@ class SecurityFinding(BaseModel):
 class SecurityResult(BaseModel):
     decision: SecurityDecision
     sanitized_document: dict[str, Any]
+    sanitized_document_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     findings: list[SecurityFinding] = Field(default_factory=list)
 
     @property

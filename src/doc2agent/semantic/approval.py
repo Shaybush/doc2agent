@@ -78,6 +78,19 @@ class ApprovalService:
         self._append_log("rolled_back", candidate, document_id, approved_by)
         return current_path
 
+    def restore_current_snapshot(
+        self,
+        document_id: str,
+        snapshot: str | None,
+    ) -> None:
+        """Restore current approval state after a failed coupled publication."""
+
+        current_path = self.current_path(document_id)
+        if snapshot is None:
+            current_path.unlink(missing_ok=True)
+            return
+        self._atomic_write(current_path, snapshot)
+
     def resolve_current_path(self, document_id: str | None = None) -> Path:
         """Resolve one current snapshot, rejecting ambiguous multi-document state."""
 

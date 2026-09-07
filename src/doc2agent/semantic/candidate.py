@@ -24,6 +24,7 @@ class KnowledgeCandidate(BaseModel):
     schema_version: Literal["2.0"]
     source_id: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     structural_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sanitized_document_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     reviewed_block_ids: list[str] = Field(min_length=1)
     document: AnalyzedDocument
     annotations: list[SemanticAnnotation] = Field(default_factory=list)
@@ -64,6 +65,7 @@ class CandidateBuilder:
             schema_version="2.0",
             source_id=patch.source_id,
             structural_sha256=patch.structural_sha256,
+            sanitized_document_sha256=_sanitized_document_sha256(document),
             reviewed_block_ids=patch.reviewed_block_ids,
             document=document.model_copy(deep=True),
             annotations=annotations,
@@ -120,7 +122,14 @@ def candidate_contract_report(candidate: KnowledgeCandidate) -> PatchValidationR
 def validate_candidate_contract(candidate: KnowledgeCandidate) -> None:
     """Reject candidate JSON that cannot satisfy the constrained patch contract."""
 
+    if candidate.sanitized_document_sha256 != _sanitized_document_sha256(candidate.document):
+        raise ValueError("Candidate sanitized document hash does not match its content")
+
     report = candidate_contract_report(candidate)
     if not report.valid:
         codes = ", ".join(issue.code for issue in report.errors)
         raise ValueError(f"Candidate violates enrichment contract: {codes}")
+
+
+def _sanitized_document_sha256(document: AnalyzedDocument) -> str:
+    return canonical_json_sha256(document.model_dump(mode="json", exclude_none=True))

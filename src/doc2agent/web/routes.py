@@ -5,6 +5,7 @@ import logging
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from threading import Lock
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import APIRouter, Form, Request, UploadFile
@@ -399,9 +400,7 @@ def create_router() -> APIRouter:
         return PlainTextResponse(
             result.markdown,
             headers={
-                "Content-Disposition": (
-                    f'attachment; filename="{_download_stem(result.filename)}.md"'
-                )
+                "Content-Disposition": _download_content_disposition(result.filename, ".md")
             },
         )
 
@@ -413,8 +412,8 @@ def create_router() -> APIRouter:
         return PlainTextResponse(
             result.published_copilot_markdown,
             headers={
-                "Content-Disposition": (
-                    f'attachment; filename="{_download_stem(result.filename)}.copilot.md"'
+                "Content-Disposition": _download_content_disposition(
+                    result.filename, ".copilot.md"
                 )
             },
         )
@@ -428,9 +427,7 @@ def create_router() -> APIRouter:
             json.dumps(result.document_json, ensure_ascii=False, indent=2),
             media_type="application/json",
             headers={
-                "Content-Disposition": (
-                    f'attachment; filename="{_download_stem(result.filename)}.json"'
-                )
+                "Content-Disposition": _download_content_disposition(result.filename, ".json")
             },
         )
 
@@ -466,6 +463,19 @@ async def _save_upload(
 
 def _download_stem(filename: str) -> str:
     return safe_name(Path(filename).stem)
+
+
+def _download_content_disposition(filename: str, extension: str) -> str:
+    """Return a browser-compatible attachment header for a Unicode filename."""
+
+    stem = _download_stem(filename)
+    download_name = f"{stem}{extension}"
+    ascii_stem = stem.encode("ascii", "ignore").decode("ascii").strip(" .")
+    fallback_name = f"{ascii_stem or 'document'}{extension}"
+    return (
+        f'attachment; filename="{fallback_name}"; '
+        f"filename*=UTF-8''{quote(download_name, safe='')}"
+    )
 
 
 def _binding_fields(form) -> tuple[str, str]:

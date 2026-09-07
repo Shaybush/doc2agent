@@ -1,6 +1,6 @@
 # `EnrichmentPatch` contract
 
-`EnrichmentPatch` is the only future LLM/provider output accepted after the
+`EnrichmentPatch` is the only LLM/provider output accepted after the
 deterministic pipeline. It is not a replacement for `document.json` and cannot
 contain structural blocks, raw Markdown, or source-file content.
 
@@ -58,5 +58,5 @@ Validate a patch without calling an LLM:
 doc2agent validate-patch patch.json --document structured.document.json
 ```
 
-A valid patch is still only a proposal. Candidate creation, approval, and
-publication are separate future stages.
+A valid patch is still only a proposal. Candidate creation, human approval, and
+publication are separate implemented actions; no patch can publish itself.

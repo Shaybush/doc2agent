@@ -14,26 +14,30 @@ DOC / DOCX / RTF
       ↓
 Converter
       ↓
-output/raw/<document>.md
-output/media/<document>/...
-output/metadata/<document>.json
+<artifact-root>/raw/<document>.md
+<artifact-root>/media/<document>/...
+<artifact-root>/metadata/<document>.json
       ↓
 MarkdownNormalizer  (deterministic)
       ↓
-output/normalized/<document>.md
+<artifact-root>/normalized/<document>.md
       ↓
 StructuralAnalyzer  (rules only, no LLM)
       ↓
-output/structured/<document>.document.json
+<artifact-root>/structured/<document>.document.json
       ↓
 DocumentValidator  (rules only, no semantic inference)
       ↓
-output/validation/<document>.validation.json
+<artifact-root>/validation/<document>.validation.json
       ↓
 SecurityGateway
       ↓
-output/security/<document>.security.json
+<artifact-root>/security/<document>.security.json
 ```
+
+The lower-level `Doc2AgentPipeline` defaults `<artifact-root>` to `output/`.
+The CLI and Web UI instead use `storage/artifacts/<source_id>/` after accepted
+ingest, so each immutable source revision has an isolated artifact tree.
 
 The current pipeline returns a readiness status from both validation and
 security. Documents with an `invalid` or `blocked` status must not be sent to
