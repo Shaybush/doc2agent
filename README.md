@@ -1,16 +1,17 @@
 # Doc2Agent — Python MVP
 
-A ready-to-open VS Code project for the first deterministic Doc2Agent pipeline:
+A ready-to-open Python project for the deterministic Doc2Agent pipeline:
 
 ```text
-DOC / DOCX / RTF → raw Markdown + media + metadata → StructuralAnalyzer → document.json
+DOCX → safe ingest → raw Markdown + media + metadata → normalization → document.json
+→ validation and security readiness
 ```
 
 The current analyzer uses **no LLM**. It preserves Unicode/Hebrew source text and only adds deterministic structure and language/direction metadata.
 
 ## 1. Open in VS Code
 
-Unzip the project and open the folder `doc2agent-python` in VS Code.
+Open the repository root (`doc2agent`) in VS Code.
 
 Recommended extensions:
 
@@ -19,9 +20,7 @@ Recommended extensions:
 
 ## 2. Create the virtual environment
 
-The easiest way is to run the VS Code task **Terminal → Run Task → Setup project**.
-
-Or from the terminal:
+From the terminal:
 
 ### macOS / Linux
 
@@ -164,7 +163,7 @@ inspect the warning and explicitly continue without opening the link:
 doc2agent pipeline input/file.docx --approve-review
 ```
 
-Validate a future provider/LLM proposal without applying it:
+Validate a provider/LLM proposal before it can be approved or published:
 
 ```bash
 doc2agent validate-patch patch.json --document structured.document.json
@@ -193,6 +192,14 @@ Generate a proposed patch only from a validated, security-approved document:
 doc2agent enrich structured.document.json \
   --validation validation.json \
   --security security.json
+```
+
+Evaluate one configured provider against a reviewed v2 golden fixture without
+approving or publishing its result:
+
+```bash
+doc2agent evaluate-enrichment input/my-document.docx \
+  --golden tests/fixtures/enrichment-v2-hebrew-golden.json
 ```
 
 DeepSeek is the default profile. Set `DEEPSEEK_API_KEY` outside the repository.

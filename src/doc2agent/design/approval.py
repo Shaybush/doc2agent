@@ -81,6 +81,15 @@ class DesignAlignmentApprovalService:
             raise ValueError(f"No approved design alignment for document: {document_id}")
         return ApprovedDesignAlignment.model_validate_json(path.read_text(encoding="utf-8"))
 
+    def restore_current_snapshot(self, document_id: str, snapshot: str | None) -> None:
+        """Restore current design approval after a failed coupled publication."""
+
+        current_path = self.current_path(document_id)
+        if snapshot is None:
+            current_path.unlink(missing_ok=True)
+            return
+        self._atomic_write(current_path, snapshot)
+
     def require_approved_snapshot(
         self,
         path: Path,

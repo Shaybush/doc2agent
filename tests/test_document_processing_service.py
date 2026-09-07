@@ -7,16 +7,43 @@ import pytest
 
 from doc2agent.analyzer import StructuralAnalyzer
 from doc2agent.application import (
+    CandidateProof,
     DocumentProcessingError,
     DocumentProcessingService,
     ProcessingResult,
 )
 from doc2agent.application import document_processing_service as service_module
+from doc2agent.design import (
+    DesignAlignmentApprovalService,
+    DesignAlignmentBuilder,
+    DesignAlignmentStore,
+    DesignBinding,
+    FigmaNode,
+    FigmaSnapshot,
+    FigmaSnapshotStore,
+)
 from doc2agent.models.document import AnalyzedDocument
 from doc2agent.security import SecurityGateway
-from doc2agent.semantic import EnrichmentPatch, EnrichmentPatchValidator, EvidenceRef, PatchFact
+from doc2agent.semantic import (
+    CandidateBuilder,
+    EnrichmentPatch,
+    EnrichmentPatchValidator,
+    EvidenceRef,
+    PatchFact,
+)
 from doc2agent.source_manifest import SourceManifest
 from doc2agent.validator import ValidationReport
+
+
+def _write_security_artifact(storage: Path, document: AnalyzedDocument) -> None:
+    security = SecurityGateway().process(document.model_dump(mode="json", exclude_none=True))
+    security_dir = (
+        storage / "artifacts" / document.source_manifest.source_id.replace(":", "-") / "security"
+    )
+    security_dir.mkdir(parents=True, exist_ok=True)
+    (security_dir / "document.security.json").write_text(
+        security.model_dump_json(indent=2), encoding="utf-8"
+    )
 
 
 def test_process_forwards_external_relationship_review_approval(tmp_path: Path) -> None:
@@ -156,3 +183,210 @@ def test_generate_candidate_uses_sanitized_document_for_evidence(
     assert candidate.document == sanitized_document
     assert candidate.reviewed_block_ids == proof.reviewed_block_ids
     assert proof.facts[0].evidence[0].source_text == block.text
+
+
+def test_approve_and_publish_keeps_previous_state_when_publication_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "requirements.md"
+    source.write_text(
+        "# Requirements\n\nThe system must retain approved state.\n",
+        encoding="utf-8",
+    )
+    document = StructuralAnalyzer().analyze(
+        source,
+        source_manifest=SourceManifest.from_path(source),
+    )
+    block = document.sections[0].blocks[0]
+
+    def candidate(fact_id: str):
+        patch = EnrichmentPatch(
+            schema_version="2.0",
+            source_id=document.source_manifest.source_id,
+            structural_sha256=document.structural_sha256,
+            scope_block_ids=[block.id],
+            reviewed_block_ids=sorted(EnrichmentPatchValidator._block_ids(document)),
+            facts=[
+                PatchFact(
+                    id=fact_id,
+                    kind="requirement",
+                    value="The system must retain approved state.",
+                    evidence=[
+                        EvidenceRef(
+                            source_id=document.source_manifest.source_id,
+                            block_id=block.id,
+                            structural_sha256=document.structural_sha256,
+                            support="explicit",
+                        )
+                    ],
+                )
+            ],
+        )
+        return CandidateBuilder().build(patch, document)
+
+    first = candidate("fact:initial-approval")
+    second = candidate("fact:replacement-approval")
+    storage = tmp_path / "storage"
+    document_id = "document:requirements"
+    approval = service_module.ApprovalService(storage)
+    approval.approve(first, document_id=document_id, approved_by="reviewer")
+    output = service_module.copilot_context_output_path(first, storage, document_id)
+    previous_markdown = service_module.TopicRenderer().render(first, output).context_path.read_text(
+        encoding="utf-8"
+    )
+    candidate_path = (
+        storage
+        / "artifacts"
+        / second.source_id.replace(":", "-")
+        / "candidate"
+        / f"{second.candidate_sha256}.knowledge.json"
+    )
+    CandidateBuilder.write_json(second, candidate_path)
+    _write_security_artifact(storage, document)
+    result = ProcessingResult(
+        filename=source.name,
+        document_id=document_id,
+        source_id=second.source_id,
+        status="ready",
+        document_json=document.model_dump(mode="json"),
+    )
+    proof = CandidateProof(
+        candidate_sha256=second.candidate_sha256,
+        reviewed_block_ids=second.reviewed_block_ids,
+        facts=[],
+    )
+    original_prepare = service_module.TopicRenderer.prepare
+
+    def fail_prepare(*_args, **_kwargs):
+        raise OSError("simulated preparation failure")
+
+    monkeypatch.setattr(service_module.TopicRenderer, "prepare", fail_prepare)
+    with pytest.raises(DocumentProcessingError, match="simulated preparation failure"):
+        DocumentProcessingService(storage).approve_and_publish(result, proof, "reviewer")
+
+    current = service_module.KnowledgeCandidate.model_validate_json(
+        approval.current_path(document_id).read_text(encoding="utf-8")
+    )
+    assert current.candidate_sha256 == first.candidate_sha256
+    assert (output / "requirements.md").read_text(encoding="utf-8") == previous_markdown
+
+    monkeypatch.setattr(service_module.TopicRenderer, "prepare", original_prepare)
+
+    def fail_activation(*_args, **_kwargs):
+        raise OSError("simulated activation failure")
+
+    monkeypatch.setattr(service_module.TopicRenderer, "activate_prepared", fail_activation)
+    with pytest.raises(DocumentProcessingError, match="simulated activation failure"):
+        DocumentProcessingService(storage).approve_and_publish(result, proof, "reviewer")
+
+    current = service_module.KnowledgeCandidate.model_validate_json(
+        approval.current_path(document_id).read_text(encoding="utf-8")
+    )
+    assert current.candidate_sha256 == first.candidate_sha256
+    assert (output / "requirements.md").read_text(encoding="utf-8") == previous_markdown
+
+
+def test_figma_approval_does_not_change_current_state_before_context_prepares(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "requirements.md"
+    source.write_text(
+        "# Requirements\n\nMap this requirement to the frame.\n",
+        encoding="utf-8",
+    )
+    document = StructuralAnalyzer().analyze(
+        source,
+        source_manifest=SourceManifest.from_path(source),
+    )
+    block = document.sections[0].blocks[0]
+    patch = EnrichmentPatch(
+        schema_version="2.0",
+        source_id=document.source_manifest.source_id,
+        structural_sha256=document.structural_sha256,
+        scope_block_ids=[block.id],
+        reviewed_block_ids=sorted(EnrichmentPatchValidator._block_ids(document)),
+        facts=[
+            PatchFact(
+                id="fact:frame-mapping",
+                kind="requirement",
+                value="Map this requirement to the frame.",
+                evidence=[
+                    EvidenceRef(
+                        source_id=document.source_manifest.source_id,
+                        block_id=block.id,
+                        structural_sha256=document.structural_sha256,
+                        support="explicit",
+                    )
+                ],
+            )
+        ],
+    )
+    candidate = CandidateBuilder().build(patch, document)
+    storage = tmp_path / "storage"
+    candidate_path = (
+        storage
+        / "artifacts"
+        / candidate.source_id.replace(":", "-")
+        / "candidate"
+        / f"{candidate.candidate_sha256}.knowledge.json"
+    )
+    CandidateBuilder.write_json(candidate, candidate_path)
+    _write_security_artifact(storage, document)
+    snapshot = FigmaSnapshot.build(
+        figma_file_key="requirements",
+        figma_url="https://www.figma.com/design/requirements/Requirements",
+        nodes=[
+            FigmaNode(
+                node_id="1:2",
+                name="Requirement frame",
+                kind="FRAME",
+                figma_url=(
+                    "https://www.figma.com/design/requirements/Requirements?node-id=1-2"
+                ),
+            )
+        ],
+        adapter="fixture",
+    )
+    FigmaSnapshotStore(storage).write(candidate.source_id, snapshot)
+    alignment = DesignAlignmentBuilder().build(
+        candidate,
+        snapshot,
+        [
+            DesignBinding(
+                annotation_id="fact:frame-mapping",
+                evidence_block_id=block.id,
+                figma_node_id="1:2",
+                status="matches",
+            )
+        ],
+    )
+    DesignAlignmentStore(storage).write(alignment)
+    result = ProcessingResult(
+        filename=source.name,
+        document_id="document:requirements",
+        source_id=candidate.source_id,
+        status="ready",
+        document_json=document.model_dump(mode="json"),
+    )
+    proof = CandidateProof(
+        candidate_sha256=candidate.candidate_sha256,
+        reviewed_block_ids=candidate.reviewed_block_ids,
+        facts=[],
+    )
+
+    def fail_prepare(*_args, **_kwargs):
+        raise OSError("simulated Figma preparation failure")
+
+    monkeypatch.setattr(service_module.TopicRenderer, "prepare", fail_prepare)
+    with pytest.raises(DocumentProcessingError, match="simulated Figma preparation failure"):
+        DocumentProcessingService(storage).approve_and_publish_with_figma(
+            result,
+            proof,
+            "reviewer",
+            snapshot.snapshot_sha256,
+        )
+
+    assert not service_module.ApprovalService(storage).current_path(result.document_id).exists()
+    assert not DesignAlignmentApprovalService(storage).current_path(result.document_id).exists()

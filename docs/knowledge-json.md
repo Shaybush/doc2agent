@@ -56,8 +56,9 @@ structure.
 The initial evaluation set contains nine expected annotations: requirement,
 decision, and action item in Russian, English, and Hebrew. It is stored in
 `tests/fixtures/semantic-evaluation-cases.json` with corresponding source text
-in `tests/fixtures/semantic-evaluation.md`. A future LLM provider must be
-evaluated against this set before it is introduced into runtime processing.
+in `tests/fixtures/semantic-evaluation.md`. `evaluate-semantic` always uses the
+deterministic fixture provider, so it is a contract baseline for
+`SemanticProvider`, not a quality result for a configured networked provider.
 
 `architecture_pipeline` is for explicit descriptions of the system architecture
 or pipeline steps. It preserves the exact source wording and evidence like every
@@ -80,11 +81,13 @@ doc2agent evaluate-semantic tests/fixtures/semantic-evaluation.md \
 ```
 
 This command intentionally uses the fixture provider, so it is a deterministic
-contract smoke test—not a DeepSeek quality result. A real provider must be
-evaluated programmatically on a versioned multilingual golden corpus with
-recorded model, prompt, configuration, and corpus versions. The gate must fail
-on invalid evidence, wrong source/structural hashes, unsupported facts, or
-metrics below an explicit threshold.
+contract smoke test—not a DeepSeek quality result. The current networked
+enrichment path is assessed with `evaluate-enrichment <source> --golden
+<fixture>` against a reviewed v2 `EnrichmentPatch` golden fixture. Before a
+provider becomes trusted by default, evaluate it programmatically on a versioned
+multilingual corpus with recorded model, prompt, configuration, and corpus
+versions. The gate must fail on invalid evidence, wrong source/structural hashes,
+unsupported facts, or metrics below an explicit threshold.
 
 ## Providers
 
@@ -92,8 +95,9 @@ metrics below an explicit threshold.
 `NoOpSemanticProvider` returns no annotations. `FixtureSemanticProvider` is a
 deterministic test utility. Neither makes a network call or uses an LLM.
 
-A future LLM provider must produce annotations through this interface and must
-not modify `document.json`, Converter output, or structural analysis.
+This interface is isolated from the networked enrichment path. The current
+networked provider returns an `EnrichmentPatch` and must not modify
+`document.json`, Converter output, or structural analysis.
 
 ## Candidate before approval
 

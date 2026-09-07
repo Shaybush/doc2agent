@@ -278,6 +278,9 @@ class IngestService:
             )
 
         existing = catalog.sources.get(manifest.source_id)
+        requested_document_id = document_id or self._document_id_for_intake_path(
+            catalog, source
+        )
         if (
             existing is not None
             and (
@@ -285,6 +288,13 @@ class IngestService:
                 or existing.review_approved
             )
         ):
+            if (
+                requested_document_id is not None
+                and requested_document_id != existing.document_id
+            ):
+                raise ValueError(
+                    "Duplicate source content already belongs to a different document"
+                )
             source_key = manifest.source_id.replace(":", "-")
             return IngestResult(
                 decision=IngestDecision.PASS,
@@ -321,8 +331,7 @@ class IngestService:
         stored_source = source_dir / manifest.filename
         manifest_path = source_dir / "source-manifest.json"
         resolved_document_id = (
-            document_id
-            or self._document_id_for_intake_path(catalog, source)
+            requested_document_id
             or f"document:{uuid.uuid4()}"
         )
         self._store_source(source, stored_source)
@@ -458,7 +467,7 @@ class IngestService:
             )
         except Exception:
             for original, moved_path in reversed(moved):
-                if moved_path.exists():
+                if moved_path.exists() or moved_path.is_symlink():
                     original.parent.mkdir(parents=True, exist_ok=True)
                     os.replace(moved_path, original)
             if approval_log is not None:
@@ -500,15 +509,17 @@ class IngestService:
             if Path(entry.source_path).parent.resolve() != source_dir.resolve():
                 raise ValueError("Source path is not in the isolated source directory")
             paths.append(source_dir)
+            artifact_root = self._artifact_root_for_source(source_id)
             if entry.artifact_root is not None:
-                artifact_root = self._artifact_root_for_source(source_id)
                 if Path(entry.artifact_root).resolve() != artifact_root.resolve():
                     raise ValueError(
                         "Artifact root is not the isolated storage directory for its source"
                     )
-                paths.append(artifact_root)
+            paths.append(artifact_root)
 
         paths.append(self._approved_document_dir(document_id))
+        paths.append(self._design_approved_document_dir(document_id))
+        paths.extend(self._figma_import_request_dirs(source_ids))
         paths.extend(self._copilot_context_paths(source_ids))
 
         unique_paths = tuple(dict.fromkeys(paths))
@@ -527,11 +538,24 @@ class IngestService:
         suffix = sha256(document_id.encode("utf-8")).hexdigest()[:12]
         return self.storage_root / "approved" / f"{readable_id}--{suffix}"
 
+    def _design_approved_document_dir(self, document_id: str) -> Path:
+        readable_id = quote(document_id, safe="-._")
+        suffix = sha256(document_id.encode("utf-8")).hexdigest()[:12]
+        return self.storage_root / "design-approved" / f"{readable_id}--{suffix}"
+
     def _source_dir_for_source(self, source_id: str) -> Path:
         return self.storage_root / "sources" / source_id.replace(":", "-")
 
     def _artifact_root_for_source(self, source_id: str) -> Path:
         return self.storage_root / "artifacts" / source_id.replace(":", "-")
+
+    def _figma_import_request_dirs(
+        self, source_ids: tuple[str, ...]
+    ) -> tuple[Path, ...]:
+        return tuple(
+            self.storage_root / "figma-import-requests" / source_id.replace(":", "-")
+            for source_id in source_ids
+        )
 
     def _copilot_context_paths(self, source_ids: tuple[str, ...]) -> tuple[Path, ...]:
         context_root = self.storage_root / "copilot-context"

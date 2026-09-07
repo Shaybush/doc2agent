@@ -55,10 +55,10 @@ def _candidate():
     return CandidateBuilder().build(patch, document)
 
 
-def _rtl_candidate():
+def _rtl_candidate(filename: str = "hebrew_test_document.docx"):
     manifest = SourceManifest(
         source_id="sha256:" + "1" * 64,
-        filename="hebrew_test_document.docx",
+        filename=filename,
         byte_size=1,
         mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         received_at=datetime(2026, 8, 28, tzinfo=UTC),
@@ -115,6 +115,54 @@ def test_renderer_writes_deterministic_context_and_manifest(tmp_path: Path) -> N
     assert "[Approved knowledge](sample.md)" in (
         output_root / "INDEX.md"
     ).read_text(encoding="utf-8")
+
+
+def test_renderer_reserves_index_filename_for_generated_index(tmp_path: Path) -> None:
+    result = TopicRenderer().render(_rtl_candidate("INDEX.docx"), tmp_path / "context")
+
+    assert result.context_path.name == "INDEX.approved-knowledge.md"
+    assert (result.output_root / "INDEX.md").read_text(encoding="utf-8").count(
+        "# Copilot context index"
+    ) == 1
+    assert "[Approved knowledge](INDEX.approved-knowledge.md)" in (
+        result.output_root / "INDEX.md"
+    ).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("corruption", ["missing", "modified"])
+def test_renderer_refuses_incomplete_or_corrupted_existing_version(
+    tmp_path: Path, corruption: str
+) -> None:
+    renderer = TopicRenderer()
+    candidate = _candidate()
+    output_root = tmp_path / "context"
+    result = renderer.render(candidate, output_root)
+    version_path = result.output_root.resolve()
+
+    if corruption == "missing":
+        (version_path / "INDEX.md").unlink()
+        expected_message = "incomplete"
+    else:
+        result.context_path.write_text("corrupted", encoding="utf-8")
+        expected_message = "mismatched hash"
+
+    with pytest.raises(ValueError, match=expected_message):
+        renderer.render(candidate, output_root)
+
+
+def test_renderer_can_prepare_before_activating_a_context_version(tmp_path: Path) -> None:
+    renderer = TopicRenderer()
+    output_root = tmp_path / "context"
+
+    prepared = renderer.prepare(_candidate(), output_root)
+
+    assert prepared.version_path.is_dir()
+    assert not output_root.exists()
+    result = renderer.activate_prepared(prepared)
+    assert output_root.is_symlink()
+    assert result.context_path.read_text(encoding="utf-8").startswith(
+        "<!-- GENERATED — DO NOT EDIT -->"
+    )
 
 
 def test_renderer_refuses_to_replace_non_generated_directory(tmp_path: Path) -> None:

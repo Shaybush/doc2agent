@@ -96,5 +96,5 @@ consumers; the corresponding JSON artifact remains available for audit.
 - `StructuralAnalyzer` defines structure only; it contains no LLM behavior.
 - `DocumentValidator` reports deterministic contract issues and makes no
   semantic inference.
-- Future semantic enrichment belongs in `SemanticAnalyzer`, after this
-  deterministic and security-reviewed boundary.
+- Semantic enrichment remains outside this deterministic pipeline and runs only
+  after its validation and security-reviewed boundary.

@@ -681,6 +681,21 @@ def approve(
         raise typer.BadParameter(
             "Candidate source is not registered; pass --document-id"
         )
+    if catalog_document_id is not None:
+        security_paths = sorted(
+            (storage / "artifacts" / candidate_model.source_id.replace(":", "-") / "security").glob(
+                "*.security.json"
+            )
+        )
+        if len(security_paths) != 1:
+            raise typer.BadParameter(
+                "Candidate source must have one security artifact before approval"
+            )
+        security_result = SecurityResult.model_validate_json(
+            security_paths[0].read_text(encoding="utf-8")
+        )
+        if candidate_model.sanitized_document_sha256 != security_result.sanitized_document_sha256:
+            raise typer.BadParameter("Candidate does not match the security-reviewed document")
     current_path = ApprovalService(storage).approve(
         candidate_model,
         document_id=resolved_document_id,

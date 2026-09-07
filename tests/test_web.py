@@ -303,6 +303,34 @@ def test_json_preview_and_download_preserve_hebrew_text() -> None:
     assert "\\u05de" not in downloaded.text
 
 
+def test_downloads_use_ascii_fallback_and_utf8_filename_for_hebrew_names() -> None:
+    result = _result().model_copy(
+        update={
+            "filename": "מסמך בדיקה.docx",
+            "published_copilot_markdown": "# Approved knowledge\n",
+        }
+    )
+    client = TestClient(create_app(service=StubProcessingService(result)))
+    client.post(
+        "/documents/process",
+        files={"file": ("example.docx", b"document bytes")},
+    )
+    artifact_id = next(iter(client.app.state.processed_artifacts._items))
+
+    for endpoint, extension in (
+        ("markdown", ".md"),
+        ("copilot-markdown", ".copilot.md"),
+        ("json", ".json"),
+    ):
+        response = client.get(f"/documents/{artifact_id}/{endpoint}")
+
+        assert response.status_code == 200
+        assert f'filename="document{extension}"' in response.headers["content-disposition"]
+        assert "filename*=UTF-8''%D7%9E%D7%A1%D7%9E%D7%9A%20%D7%91%D7%93%D7%99%D7%A7%D7%94" in (
+            response.headers["content-disposition"]
+        )
+
+
 def test_published_copilot_markdown_is_available_only_when_present() -> None:
     result = _result().model_copy(update={"published_copilot_markdown": "# Approved knowledge\n"})
     client = TestClient(create_app(service=StubProcessingService(result)))

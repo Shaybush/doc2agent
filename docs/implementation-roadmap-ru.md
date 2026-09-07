@@ -181,8 +181,10 @@ retention-политики.
 - Ввести строгую Pydantic-модель `EnrichmentPatch`.
 - Передавать LLM только `sanitized_document` после успешных validation и
   security gates.
-- Разбивать документ на ограниченные section scopes; не отправлять весь
-  большой документ одним запросом.
+- Передавать только `sanitized_document` и ограничивать patch списком допустимых
+  content block IDs. Текущий путь обрабатывает один документ одним запросом;
+  section chunking откладывается до появления подтверждённой необходимости по
+  quality corpus.
 - В патче требовать `source_id`, `structural_sha256`, список разрешённых
   `block_id`, факты и доказательства.
 - Запрещать неизвестные поля и факты без `EvidenceRef`.
@@ -252,17 +254,23 @@ Markdown, а Copilot читает только generated-каталог.
 
 - Расширить golden corpus DOCX: RTL, таблицы, списки, изображения, ссылки,
   комментарии, tracked changes и неподдерживаемые элементы.
-- Добавить quality gate для реального LLM по размеченному набору.
+- Расширить уже реализованный v2 golden evaluator до quality gate для реального
+  LLM по размеченному набору.
 - Вводить cache key из хешей входа, версии схемы, prompt/config/model версий.
 - Добавить resume только после того, как стадии имеют явные входы, выходы и
   идемпотентность.
 - SQLite/state-store и locking вводить при появлении параллельных запусков или
   необходимости долговременного управления заданиями.
 
-**Первый slice:** собрать 5–10 DOCX с ожидаемыми фактами и proof, запускать
-реальный provider на каждом и сохранять безопасные метрики missing,
-unexpected и wrong-kind facts. До этого не добавлять cache, resume или фоновые
-задачи.
+**Текущее состояние:** есть один проверяемый v2 golden fixture и команда
+`evaluate-enrichment`, которая прогоняет provider patch через ingest,
+детерминированный pipeline и проверку evidence. Это инфраструктура quality
+gate, а не доказательство качества реального provider.
+
+**Первый следующий slice:** собрать 5–10 DOCX с ожидаемыми фактами и proof,
+запускать реальный provider на каждом и сохранять безопасные метрики missing,
+unexpected, wrong-kind и invalid-evidence facts. До этого не добавлять cache,
+resume, section chunking или фоновые задачи.
 
 ## Что не входит в ближайший релиз
 
@@ -277,21 +285,20 @@ unexpected и wrong-kind facts. До этого не добавлять cache, r
 Они не нужны, чтобы получить устойчивую цепочку «документ → проверенный
 контекст Copilot», и не должны задерживать её.
 
-## Минимальный набор CLI-команд
-
-Названия окончательно фиксируются при реализации, но границы должны быть
-такими:
+## Реализованные CLI-команды
 
 ```text
 doc2agent ingest source.docx
 doc2agent pipeline source.docx
-doc2agent enrich <structural-artifact>
-doc2agent validate-patch <patch>
-doc2agent review <candidate-id>
-doc2agent approve <candidate-id>
-doc2agent publish
-doc2agent render-copilot
-doc2agent verify
+doc2agent enrich structured.document.json --validation validation.json --security security.json
+doc2agent validate-patch patch.json --document structured.document.json
+doc2agent create-candidate patch.json --document structured.document.json
+doc2agent review-candidate candidate.knowledge.json
+doc2agent approve candidate.knowledge.json --by reviewer
+doc2agent rollback --candidate-hash <hash> --document-id <document-id> --by reviewer
+doc2agent render-copilot --document-id <document-id>
+doc2agent evaluate-semantic tests/fixtures/semantic-evaluation.md --cases tests/fixtures/semantic-evaluation-cases.json
+doc2agent evaluate-enrichment source.docx --golden tests/fixtures/enrichment-v2-hebrew-golden.json
 ```
 
 Команда `pipeline` остаётся детерминированной до security gate. Вызов LLM,
@@ -299,13 +306,8 @@ approval и публикация — отдельные, наблюдаемые 
 
 ## Ближайшая реализационная задача
 
-Начать с **Этапа 0** в отдельном небольшом изменении:
-
-1. новые Pydantic-контракты `SourceManifest` и `EvidenceRef`;
-2. вычисление хешей исходника и `document.json`;
-3. тесты на стабильность хешей и связь evidence с конкретной структурной
-   ревизией;
-4. обновление существующей документации контрактов.
-
-Этот этап не требует реального LLM, не меняет Converter и создаёт фундамент
-для безопасного candidate/approved-потока.
+Начать с первого slice **Этапа 6**: подготовить версионируемый набор из 5–10
+анонимизированных DOCX и golden fixtures с ожидаемыми facts и evidence. Затем
+запускать `evaluate-enrichment` для каждого provider/model/configuration и
+сохранять только безопасный отчёт метрик. Этот шаг не меняет Converter,
+канонический `document.json` или published snapshots.
